@@ -214,11 +214,9 @@ const VehicleDashboard: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        const API_URL = 'https://smartdatalink.com.au/get-charts-data-new';
-        const res = await fetch(`${API_URL}?t=${Date.now()}`, {
-          cache: 'no-cache',
-          mode: 'cors',
-          headers: { 'Accept': 'application/json' }
+        const res = await fetch('/data/telemetry.json', {
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-store'
         });
         if (!res.ok) throw new Error('no json');
         const json = await res.json();
@@ -357,11 +355,11 @@ const VehicleDashboard: React.FC = () => {
           };
           (payload.analogPerSecond as Array<any>).forEach(series => {
             const id = String(series.id);
-            const rawPts = (series.points || []).map((r: any) => ({ time: parseHMS(r.time), avg: Number(r.avg), min: Number(r.min), max: Number(r.max) }));
+          const rawPts = (series.points || []).map((r: any) => ({ time: parseHMS(r.time), avg: Number(r.avg), min: Number(r.min), max: Number(r.max), hms: String(r.time) }));
             const rawVals: number[] = [];
             rawPts.forEach((p: { avg: number; min: number; max: number }) => { rawVals.push(p.avg, p.min, p.max); });
             const scale = computeScale(rawVals, series.yAxisRange ? { min: Number(series.yAxisRange.min), max: Number(series.yAxisRange.max) } : undefined);
-            const pts = rawPts.map((p: { time: Date; avg: number; min: number; max: number }) => ({ time: p.time, avg: p.avg * scale, min: p.min * scale, max: p.max * scale }));
+            const pts = rawPts.map((p: { time: Date; avg: number; min: number; max: number; hms: string }) => ({ time: p.time, avg: p.avg * scale, min: p.min * scale, max: p.max * scale, rawAvg: p.avg, rawMin: p.min, rawMax: p.max, hms: p.hms }));
             if (!pts.length) return;
             const localMin = pts[0].time.getTime();
             const localMax = pts[pts.length - 1].time.getTime();
@@ -526,21 +524,19 @@ const VehicleDashboard: React.FC = () => {
     const start = new Date(startTimestamp);
     const end = new Date(endTimestamp);
     
-    // Enforce max 1 hour range
-    const maxRangeMs = 60 * 60 * 1000; // 1 hour
+    // Enforce MIN 1 hour range
+    const minRangeMs = 60 * 60 * 1000; // 1 hour
     const rangeMs = endTimestamp - startTimestamp;
-    
-    if (rangeMs > maxRangeMs) {
-      const adjustedEnd = new Date(startTimestamp + maxRangeMs);
-      setSelectionStart(start);
-      setSelectionEnd(adjustedEnd);
-    } else {
-      setSelectionStart(start);
-      setSelectionEnd(end);
+    const newStart = start;
+    let newEnd = end;
+    if (rangeMs < minRangeMs) {
+      newEnd = new Date(startTimestamp + minRangeMs);
     }
+    setSelectionStart(newStart);
+    setSelectionEnd(newEnd);
     
     // Update selected time to center of range if needed
-    const centerTime = new Date((startTimestamp + endTimestamp) / 2);
+    const centerTime = new Date((newStart.getTime() + newEnd.getTime()) / 2);
     setSelectedTime(centerTime);
   }, []);
 

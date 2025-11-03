@@ -38,7 +38,7 @@ const MapComponent: React.FC = () => {
   useEffect(() => {
     const loadGps = async () => {
       try {
-        const res = await fetch(`https://smartdatalink.com.au/get-charts-data-new?t=${Date.now()}`, { headers: { 'Accept': 'application/json' }, cache: 'no-cache', mode: 'cors' });
+        const res = await fetch('/data/telemetry.json', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
         const json = await res.json();
         const payload: any = (json && typeof json === 'object' && 'data' in json) ? (json as any).data : json;
         const timesRaw: any[] = Array.isArray(payload?.times) ? payload.times : Array.isArray(payload?.timestamps) ? payload.timestamps : [];

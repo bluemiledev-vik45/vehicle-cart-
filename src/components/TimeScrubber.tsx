@@ -172,6 +172,15 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     return CHART_LEFT_OFFSET + inner * percentForSelected;
   }, [percentForSelected, overlayWidth]);
 
+  const positionForTime = useCallback((t: number | null) => {
+    if (t === null || !timeDomain) return null;
+    const inner = Math.max(1, overlayWidth - CHART_LEFT_OFFSET - RIGHT_MARGIN);
+    const p = (t - timeDomain[0]) / (timeDomain[1] - timeDomain[0]);
+    return CHART_LEFT_OFFSET + inner * Math.max(0, Math.min(1, p));
+  }, [overlayWidth, timeDomain]);
+  const leftHandlePx = useMemo(() => positionForTime(selectionStart), [positionForTime, selectionStart]);
+  const rightHandlePx = useMemo(() => positionForTime(selectionEnd), [positionForTime, selectionEnd]);
+
   // Uniform ticks across all charts (every 10 minutes)
   const ticks = useMemo(() => {
     if (!timeDomain) return undefined;
@@ -203,12 +212,19 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     document.body.style.userSelect = 'none';
     document.body.style.cursor = 'ew-resize';
 
-    const t = timeFromClientX(e.clientX);
+    let t = timeFromClientX(e.clientX);
+    // Clamp knob inside selection when both ends defined
+    if (selectionStart !== null && selectionEnd !== null) {
+      t = Math.max(selectionStart, Math.min(selectionEnd, t));
+    }
     onTimeChange(t);
     const onMove = (ev: MouseEvent) => {
       ev.preventDefault();
       if (!knobDraggingRef.current) return;
-      const t2 = timeFromClientX(ev.clientX);
+      let t2 = timeFromClientX(ev.clientX);
+      if (selectionStart !== null && selectionEnd !== null) {
+        t2 = Math.max(selectionStart, Math.min(selectionEnd, t2));
+      }
       onTimeChange(t2);
     };
     const onUp = () => {
@@ -216,6 +232,47 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
       isDraggingRef.current = false;
       document.body.style.userSelect = prevUserSelect;
       document.body.style.cursor = prevCursor;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const MIN_RANGE = 60 * 60 * 1000; // 1 hour
+
+  const onLeftHandleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startStart = selectionStart ?? timeDomain[0];
+    const onMove = (ev: MouseEvent) => {
+      ev.preventDefault();
+      let newStart = timeFromClientX(ev.clientX);
+      const end = selectionEnd ?? timeDomain[1];
+      // Enforce minimum 1 hour
+      if (end - newStart < MIN_RANGE) newStart = end - MIN_RANGE;
+      newStart = clampToDay(newStart);
+      onSelectionChange(newStart, end);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const onRightHandleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const onMove = (ev: MouseEvent) => {
+      ev.preventDefault();
+      const start = selectionStart ?? timeDomain[0];
+      let newEnd = timeFromClientX(ev.clientX);
+      if (newEnd - start < MIN_RANGE) newEnd = start + MIN_RANGE;
+      newEnd = clampToDay(newEnd);
+      onSelectionChange(start, newEnd);
+    };
+    const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -287,6 +344,22 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
             >
               <div className={styles.vehiclePointerIcon} />
             </div>
+          )}
+          {leftHandlePx !== null && (
+            <div
+              className={styles.rangeHandle}
+              style={{ left: `${leftHandlePx}px` }}
+              onMouseDown={onLeftHandleMouseDown}
+              title="Drag left handle"
+            />
+          )}
+          {rightHandlePx !== null && (
+            <div
+              className={styles.rangeHandle}
+              style={{ left: `${rightHandlePx}px` }}
+              onMouseDown={onRightHandleMouseDown}
+              title="Drag right handle"
+            />
           )}
         </div>
       </div>

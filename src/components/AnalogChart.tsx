@@ -97,6 +97,27 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     return out;
   }, [data, timeDomain]);
 
+  // Build a per-second lookup map from the original data to preserve exact second stats
+  const perSecondMap = useMemo(() => {
+    const map = new Map<string, { avg: number; min: number; max: number }>();
+    (data as any[]).forEach((d: any) => {
+      const key = (d.hms as string) || format(d.time, 'HH:mm:ss');
+      const avg = Number(d.rawAvg ?? d.avg ?? d.value);
+      const minSource = d.rawMin ?? d.min ?? d.value;
+      const maxSource = d.rawMax ?? d.max ?? d.value;
+      const min = Number(minSource);
+      const max = Number(maxSource);
+      if (key && Number.isFinite(avg)) {
+        map.set(key, {
+          avg,
+          min: Number.isFinite(min) ? min : avg,
+          max: Number.isFinite(max) ? max : avg,
+        });
+      }
+    });
+    return map;
+  }, [data]);
+
   const formatTime = (tick: number) => {
     return format(new Date(tick), 'HH:mm');
   };
@@ -108,6 +129,13 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
   const getPointAtTime = (time: Date | null): { time: number; avg: number; min: number; max: number } | null => {
     if (!time || chartData.length === 0) return null;
     const timestamp = time.getTime();
+
+    // Prefer exact per-second values when available from original data
+    if (perSecondMap.size > 0) {
+      const key = format(time, 'HH:mm:ss');
+      const hit = perSecondMap.get(key);
+      if (hit) return { time: time.getTime(), avg: hit.avg, min: hit.min, max: hit.max };
+    }
 
     let closest = chartData[0];
     let minDiff = Math.abs(closest.time - timestamp);
