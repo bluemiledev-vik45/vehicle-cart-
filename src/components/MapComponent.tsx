@@ -38,8 +38,19 @@ const MapComponent: React.FC = () => {
   useEffect(() => {
     const loadGps = async () => {
       try {
-        const res = await fetch('/data/telemetry.json', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
-        const json = await res.json();
+        // Prefer external API, fall back to local JSON if unavailable
+        let json: any;
+        try {
+          const apiUrl = new URL('https://no-reply.com.au/smart_data_link/get_charts_data_1');
+          apiUrl.search = window.location.search; // pass through any query params
+          const apiRes = await fetch(apiUrl.toString(), { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+          if (!apiRes.ok) throw new Error('api failed');
+          json = await apiRes.json();
+        } catch {
+          const res = await fetch('/data/telemetry.json', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+          if (!res.ok) throw new Error('no local');
+          json = await res.json();
+        }
         const payload: any = (json && typeof json === 'object' && 'data' in json) ? (json as any).data : json;
         const timesRaw: any[] = Array.isArray(payload?.times) ? payload.times : Array.isArray(payload?.timestamps) ? payload.timestamps : [];
         const normalizeTimes = (arr: any[]): number[] => {

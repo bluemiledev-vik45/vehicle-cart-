@@ -214,12 +214,25 @@ const VehicleDashboard: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch('/data/telemetry.json', {
-          headers: { 'Accept': 'application/json' },
-          cache: 'no-store'
-        });
-        if (!res.ok) throw new Error('no json');
-        const json = await res.json();
+        // Prefer external API, fall back to local JSON if unavailable
+        let json: any;
+        try {
+          const apiUrl = new URL('https://no-reply.com.au/smart_data_link/get_charts_data_1');
+          apiUrl.search = window.location.search; // pass through any query params
+          const apiRes = await fetch(apiUrl.toString(), {
+            headers: { 'Accept': 'application/json' },
+            cache: 'no-store'
+          });
+          if (!apiRes.ok) throw new Error('api failed');
+          json = await apiRes.json();
+        } catch {
+          const resLocal = await fetch('/data/telemetry.json', {
+            headers: { 'Accept': 'application/json' },
+            cache: 'no-store'
+          });
+          if (!resLocal.ok) throw new Error('no json');
+          json = await resLocal.json();
+        }
         // Unwrap common API envelope { status, message, data }
         const payload: any = (json && typeof json === 'object' && 'data' in json) ? (json as any).data : json;
         // Normalize possible server payloads into common structure
