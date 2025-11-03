@@ -172,6 +172,17 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     return CHART_LEFT_OFFSET + inner * percentForSelected;
   }, [percentForSelected, overlayWidth]);
 
+  // Uniform ticks across all charts (every 10 minutes)
+  const ticks = useMemo(() => {
+    if (!timeDomain) return undefined;
+    const [start, end] = timeDomain;
+    const step = 10 * 60 * 1000;
+    const alignedStart = Math.floor(start / step) * step;
+    const arr: number[] = [];
+    for (let t = alignedStart; t <= end; t += step) arr.push(t);
+    return arr;
+  }, [timeDomain]);
+
   const timeFromClientX = useCallback((clientX: number) => {
     const el = overlayRef.current;
     if (!el) return selectedTime ?? timeDomain[0];
@@ -243,6 +254,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
               type="number"
               scale="time"
               domain={timeDomain}
+              ticks={ticks as any}
               tickFormatter={formatTime}
               tick={{ fill: '#6b7280', fontSize: 9 }}
               style={{ fontSize: '9px' }}

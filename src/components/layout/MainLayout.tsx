@@ -8,15 +8,15 @@ import styles from './MainLayout.module.css';
 const MainLayout: React.FC = () => {
   return (
     <TimeProvider>
-      <div className={styles.layout}>
-        <FilterControls />
-        <div className={styles.main}>
-          <MapComponent />
-          <div className={styles.content}>
-            <VehicleDashboard />
-          </div>
+    <div className={styles.layout}>
+      <FilterControls />
+      <div className={styles.main}>
+        <MapComponent />
+        <div className={styles.content}>
+          <VehicleDashboard />
         </div>
       </div>
+    </div>
     </TimeProvider>
   );
 };

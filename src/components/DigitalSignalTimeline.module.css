@@ -8,7 +8,7 @@
 }
 
 .chartHeader {
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -24,8 +24,51 @@
 .chartWrapper {
   width: 100%;
   height: 220px;
+  margin-top: 6px;
   margin-bottom: 8px;
+  position: relative;
 }
+
+.chartRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.chartArea {
+  flex: 1 1 auto;
+  min-width: 0; /* allow chart to shrink */
+}
+
+.statusPanel {
+ 
+  width: 220px;
+  flex: 0 0 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.rowStatus {
+  position: absolute;
+  right: 32px;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f3f4f6;
+}
+
+.on { color: #10b981; font-weight: 700; }
+.off { color: #6b7280; font-weight: 700; }
 
 .noData {
   padding: 24px;
@@ -62,6 +105,13 @@
   padding: 12px 0;
   margin-top: 8px;
   border-top: 1px solid #e5e7eb;
+}
+
+.legendColumn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
 }
 
 .legendItem {

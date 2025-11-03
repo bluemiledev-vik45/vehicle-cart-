@@ -158,6 +158,17 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     return hasAny ? (timeDomain as [number, number]) : ([dataMin, dataMax] as [number, number]);
   }, [chartData, timeDomain]);
 
+  // Uniform ticks every 10 minutes to match scrubber
+  const ticks = useMemo(() => {
+    if (!timeDomain) return undefined;
+    const [start, end] = timeDomain;
+    const step = 10 * 60 * 1000;
+    const alignedStart = Math.floor(start / step) * step;
+    const arr: number[] = [];
+    for (let t = alignedStart; t <= end; t += step) arr.push(t);
+    return arr;
+  }, [timeDomain]);
+
   const selectedPoint = getPointAtTime(selectedTime);
   const displayStats = selectedPoint
     ? { avg: selectedPoint.avg, min: selectedPoint.min, max: selectedPoint.max }
@@ -203,6 +214,7 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
               type="number"
               scale="time"
               domain={xDomain as any}
+              ticks={ticks as any}
               tickFormatter={formatTime}
               stroke="#6b7280"
               tick={{ fill: '#6b7280', fontSize: 9 }}

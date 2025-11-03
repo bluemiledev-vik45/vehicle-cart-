@@ -1,5 +1,5 @@
 import React from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import styles from './MapComponent.module.css';
@@ -38,18 +38,36 @@ const MapComponent: React.FC = () => {
   useEffect(() => {
     const loadGps = async () => {
       try {
-        const res = await fetch(`/data/telemetry.json`, { headers: { 'Accept': 'application/json' }, cache: 'no-cache' });
+        const res = await fetch(`https://smartdatalink.com.au/get-charts-data-new?t=${Date.now()}`, { headers: { 'Accept': 'application/json' }, cache: 'no-cache', mode: 'cors' });
         const json = await res.json();
-        const times: number[] = Array.isArray(json?.times) ? json.times : [];
+        const payload: any = (json && typeof json === 'object' && 'data' in json) ? (json as any).data : json;
+        const timesRaw: any[] = Array.isArray(payload?.times) ? payload.times : Array.isArray(payload?.timestamps) ? payload.timestamps : [];
+        const normalizeTimes = (arr: any[]): number[] => {
+          const nums = arr.map((t: any) => typeof t === 'number' ? t : Date.parse(String(t))).filter((n: number) => Number.isFinite(n));
+          if (!nums.length) return [];
+          const max = Math.max(...nums);
+          return max < 1e12 ? nums.map(n => n * 1000) : nums;
+        };
+        const times = normalizeTimes(timesRaw);
         const base = new Date(times?.[0] ?? Date.now());
         base.setHours(0, 0, 0, 0);
         const parseHMS = (hms: string) => {
           const [hh, mm, ss] = String(hms).split(':').map((n: string) => Number(n));
           return base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000;
         };
-        const pts: GpsPoint[] = Array.isArray(json?.gpsPerSecond)
-          ? json.gpsPerSecond.map((p: any) => ({ time: parseHMS(p.time), lat: Number(p.lat), lng: Number(p.lng) }))
-          : [];
+        const arr: any[] = Array.isArray(payload?.gpsPerSecond) ? payload.gpsPerSecond : [];
+        const pts: GpsPoint[] = arr.map((p: any) => ({
+          time: (() => {
+            const ts = p.timestamp ?? p.timeStamp ?? p.ts ?? null;
+            if (ts != null) {
+              const n = Number(ts);
+              if (Number.isFinite(n)) return n < 1e12 ? n * 1000 : n;
+            }
+            return parseHMS(String(p.time ?? p.Time ?? p.TIME ?? '00:00:00'));
+          })(),
+          lat: Number(p.lat ?? p.latitude ?? p.Latitude ?? p.Lat ?? p.LAT),
+          lng: Number(p.lng ?? p.lon ?? p.longitude ?? p.Longitude ?? p.Lon ?? p.LON)
+        })).filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
         pts.sort((a, b) => a.time - b.time);
         setGpsPoints(pts);
       } catch (e) {
@@ -62,7 +80,6 @@ const MapComponent: React.FC = () => {
   const currentPosition = useMemo<[number, number] | null>(() => {
     if (!selectedTime || gpsPoints.length === 0) return null;
     const t = selectedTime.getTime();
-    // binary search nearest
     let lo = 0, hi = gpsPoints.length - 1;
     while (lo < hi) {
       const mid = Math.floor((lo + hi) / 2);
@@ -76,6 +93,16 @@ const MapComponent: React.FC = () => {
     return [pick.lat, pick.lng];
   }, [selectedTime, gpsPoints]);
 
+  const Recenter: React.FC<{ position: [number, number] | null }> = ({ position }) => {
+    const map = useMap();
+    React.useEffect(() => {
+      if (position) {
+        map.setView(position);
+      }
+    }, [position, map]);
+    return null;
+  };
+
   return (
     <div className={styles.mapContainer}>
       <div className={styles.mapHeader}>
@@ -87,7 +114,7 @@ const MapComponent: React.FC = () => {
       </div>
       
       <MapContainer
-        center={center}
+        center={currentPosition ?? center}
         zoom={10}
         className={styles.map}
         zoomControl={true}
@@ -99,6 +126,7 @@ const MapComponent: React.FC = () => {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        <Recenter position={currentPosition} />
         {currentPosition && (
           <Marker position={currentPosition} icon={vehicleIcon}>
             <Popup>
