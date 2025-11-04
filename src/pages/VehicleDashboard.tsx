@@ -237,6 +237,12 @@ const VehicleDashboard: React.FC = () => {
         }
         // Unwrap common API envelope { status, message, data }
         const payload: any = (json && typeof json === 'object' && 'data' in json) ? (json as any).data : json;
+        
+        // Debug: Log full API response
+        console.group('📊 API Response - Full Payload');
+        console.log('Raw JSON:', json);
+        console.log('Payload:', payload);
+        console.groupEnd();
         // Normalize possible server payloads into common structure
         // Prefer json.times, but also accept 'timestamps' variants and string times
         const pick = (...paths: string[]): any => {
@@ -246,79 +252,187 @@ const VehicleDashboard: React.FC = () => {
           }
           return undefined;
         };
-        const timesRaw: any[] = Array.isArray(pick('times', 'timeStamps', 'timestamps')) ? pick('times', 'timeStamps', 'timestamps') : [];
-        const normalizeTimes = (arr: any[]): number[] => {
-          const nums = arr.map((t: any) => typeof t === 'number' ? t : Date.parse(String(t))).filter((n: number) => Number.isFinite(n));
-          if (!nums.length) return [];
-          const max = Math.max(...nums);
-          // If looks like seconds precision (10 digits), convert to ms
-          if (max < 1e12) return nums.map(n => n * 1000);
-          return nums;
-        };
-        const times: number[] = normalizeTimes(timesRaw);
-        const toSeries = (values: number[]) => values.map((v: number, idx: number) => {
-          const base = times[idx] ?? (times[0] ?? Date.now()) + idx * 60000;
-          return { time: new Date(base), value: Number(v) };
-        });
-        const toSeriesTriplet = (avgVals: number[], minVals?: number[] | null, maxVals?: number[] | null) => {
-          return avgVals.map((v: number, idx: number) => {
-            const base = times[idx] ?? (times[0] ?? Date.now()) + idx * 60000;
-            const avg = Number(v);
-            const min = Number(minVals?.[idx]);
-            const max = Number(maxVals?.[idx]);
-            return { time: new Date(base), avg, min: Number.isFinite(min) ? min : avg, max: Number.isFinite(max) ? max : avg } as any;
-          });
-        };
-        const computeScale = (vals: number[], range?: { min: number; max: number }): number => {
-          if (!range || !vals.length) return 1;
-          const vmin = Math.min(...vals);
-          const vmax = Math.max(...vals);
-          if (vmin >= range.min && vmax <= range.max) return 1;
-          const factors = [10, 100, 1000];
-          for (const f of factors) {
-            const vmind = vmin / f;
-            const vmaxd = vmax / f;
-            if (vmind >= range.min && vmaxd <= range.max) return 1 / f;
+        // Helper function to parse timestamp and align to minute boundary
+        const parseTimestampToMs = (timestamp: any): number => {
+          let ts: number;
+          if (typeof timestamp === 'number') {
+            ts = timestamp;
+          } else if (typeof timestamp === 'string') {
+            ts = Date.parse(timestamp);
+          } else {
+            return NaN;
           }
-          return 1;
+          // If timestamp is in seconds (10 digits or less), convert to milliseconds
+          if (ts < 1e12) {
+            ts = ts * 1000;
+          }
+          return ts;
         };
+
+        // Align timestamp to minute boundary: Math.floor(timestamp / 60000) * 60000
+        const alignToMinute = (timestampMs: number): number => {
+          return Math.floor(timestampMs / 60000) * 60000;
+        };
+
+        const timesRaw: any[] = Array.isArray(pick('times', 'timeStamps', 'timestamps')) ? pick('times', 'timeStamps', 'timestamps') : [];
+        const times: number[] = timesRaw
+          .map(parseTimestampToMs)
+          .filter((n: number) => Number.isFinite(n))
+          .map(alignToMinute)
+          .sort((a, b) => a - b); // Sort ascending
+
+        // Create series mapping function that uses exact API values and aligned timestamps
+        const toSeries = (values: number[], timestamps?: number[]): Array<{ time: Date; value: number }> => {
+          const usedTimes = timestamps || times;
+          const points = values.map((v: number, idx: number) => {
+            const timestamp = usedTimes[idx];
+            if (!Number.isFinite(timestamp)) return null;
+            const alignedTs = alignToMinute(timestamp);
+            return { time: new Date(alignedTs), value: Number(v) };
+          }).filter((p): p is { time: Date; value: number } => p !== null);
+          
+          // Sort by timestamp ascending
+          return points.sort((a, b) => a.time.getTime() - b.time.getTime());
+        };
+
+        // Create triplet series with exact API values (no scaling)
+        const toSeriesTriplet = (
+          avgVals: number[], 
+          minVals?: number[] | null, 
+          maxVals?: number[] | null,
+          timestamps?: number[]
+        ): Array<{ time: Date; avg: number; min: number; max: number }> => {
+          const usedTimes = timestamps || times;
+          const points = avgVals.map((v: number, idx: number) => {
+            const timestamp = usedTimes[idx];
+            if (!Number.isFinite(timestamp)) return null;
+            const alignedTs = alignToMinute(timestamp);
+            const avg = Number(v);
+            const min = minVals && idx < minVals.length ? Number(minVals[idx]) : avg;
+            const max = maxVals && idx < maxVals.length ? Number(maxVals[idx]) : avg;
+            return {
+              time: new Date(alignedTs),
+              avg: Number.isFinite(avg) ? avg : 0,
+              min: Number.isFinite(min) ? min : avg,
+              max: Number.isFinite(max) ? max : avg
+            };
+          }).filter((p): p is { time: Date; avg: number; min: number; max: number } => p !== null);
+          
+          // Sort by timestamp ascending
+          return points.sort((a, b) => a.time.getTime() - b.time.getTime());
+        };
+
+        const digitalSignalsRaw = pick('digitalSignals', 'digitals', 'digital') || [];
+        console.group('📡 Digital Signals - API Response');
+        console.log('Number of digital signals:', digitalSignalsRaw.length);
+        digitalSignalsRaw.forEach((s: any, idx: number) => {
+          console.group(`Digital Signal ${idx + 1}: ${s.id || s.name || 'Unknown'}`);
+          console.log('Raw API Data:', s);
+          console.log('Values array:', s.values);
+          console.log('Values length:', s.values?.length || 0);
+          console.log('Times array:', s.times || s.timeStamps || s.timestamps || 'Using global times');
+          console.groupEnd();
+        });
+        console.groupEnd();
 
         let digitalChart: DigitalStatusChart = {
           id: 'digital-status',
           name: 'Digital Status Indicators',
-          metrics: (pick('digitalSignals', 'digitals', 'digital') || []).map((s: any) => ({
-            id: String(s.id),
-            name: String(s.name ?? s.id),
-            color: String(s.color ?? '#999'),
-            data: toSeries(s.values || []),
-            currentValue: Number((s.values || []).slice(-1)[0] ?? 0)
-          }))
+          metrics: digitalSignalsRaw.map((s: any, idx: number) => {
+            const signalTimes = s.times || s.timeStamps || s.timestamps || times;
+            const normalizedSignalTimes = Array.isArray(signalTimes)
+              ? signalTimes.map(parseTimestampToMs).filter((n: number) => Number.isFinite(n)).map(alignToMinute).sort((a: number, b: number) => a - b)
+              : times;
+            const data = toSeries(s.values || [], normalizedSignalTimes);
+            
+            // Debug: Log processed data for this signal
+            console.group(`🔍 Digital Signal ${idx + 1} - Processed Data: ${s.id || s.name || 'Unknown'}`);
+            console.log('API Values:', s.values);
+            console.log('API Timestamps:', signalTimes);
+            console.log('Normalized Timestamps (aligned to minutes):', normalizedSignalTimes);
+            console.log('Processed Data Points:', data);
+            console.log('Data Points Count:', data.length);
+            console.log('First 5 data points:', data.slice(0, 5));
+            console.log('Last 5 data points:', data.slice(-5));
+            console.groupEnd();
+            
+            return {
+              id: String(s.id),
+              name: String(s.name ?? s.id),
+              color: String(s.color ?? '#999'),
+              data,
+              currentValue: data.length > 0 ? Number(data[data.length - 1].value) : 0
+            };
+          })
         };
 
         const analogSignalsArr: any[] = (pick('analogSignals', 'analogs', 'analog') || []);
-        const analogMetrics: VehicleMetric[] = analogSignalsArr.map((s: any) => {
+        console.group('📈 Analog Signals - API Response');
+        console.log('Number of analog signals:', analogSignalsArr.length);
+        analogSignalsArr.forEach((s: any, idx: number) => {
+          console.group(`Analog Signal ${idx + 1}: ${s.id || s.name || 'Unknown'}`);
+          console.log('Raw API Data:', s);
+          console.log('Avg values:', s.values ?? s.avg ?? s.average);
+          console.log('Min values:', s.mins ?? s.minValues ?? s.min);
+          console.log('Max values:', s.maxs ?? s.maxValues ?? s.max);
+          console.log('Y-Axis Range:', s.yAxisRange);
+          console.log('Times array:', s.times || s.timeStamps || s.timestamps || 'Using global times');
+          console.log('Values length:', (s.values ?? s.avg ?? s.average)?.length || 0);
+          console.groupEnd();
+        });
+        console.groupEnd();
+
+        const analogMetrics: VehicleMetric[] = analogSignalsArr.map((s: any, idx: number) => {
+          // Use exact API values without scaling
           const avgRaw: number[] = (s.values ?? s.avg ?? s.average ?? []).map((v: any) => Number(v));
           const minsRaw: number[] | undefined = (s.mins ?? s.minValues ?? s.min ?? null)?.map?.((v: any) => Number(v));
           const maxsRaw: number[] | undefined = (s.maxs ?? s.maxValues ?? s.max ?? null)?.map?.((v: any) => Number(v));
-          const scale = computeScale(avgRaw, s.yAxisRange ? { min: Number(s.yAxisRange.min), max: Number(s.yAxisRange.max) } : undefined);
-          const avgScaled = avgRaw.map(v => v * scale);
-          let minsScaled = minsRaw ? minsRaw.map(v => v * scale) : undefined;
-          let maxsScaled = maxsRaw ? maxsRaw.map(v => v * scale) : undefined;
-          const isAllZero = (arr?: number[]) => Array.isArray(arr) && arr.every((n: number) => !Number.isFinite(n) || n === 0);
-          if (isAllZero(minsScaled)) minsScaled = undefined;
-          if (isAllZero(maxsScaled)) maxsScaled = undefined;
-          const data = (minsScaled || maxsScaled) ? toSeriesTriplet(avgScaled, minsScaled, maxsScaled) : toSeries(avgScaled);
-          const values = avgScaled;
+          
+          // Get signal-specific timestamps if available, otherwise use global times
+          const signalTimes = s.times || s.timeStamps || s.timestamps || times;
+          const normalizedSignalTimes = Array.isArray(signalTimes)
+            ? signalTimes.map(parseTimestampToMs).filter((n: number) => Number.isFinite(n)).map(alignToMinute).sort((a: number, b: number) => a - b)
+            : times;
+          
+          // Create data points with exact API values, aligned timestamps, and sorted
+          const data = (minsRaw || maxsRaw) 
+            ? toSeriesTriplet(avgRaw, minsRaw, maxsRaw, normalizedSignalTimes)
+            : toSeries(avgRaw, normalizedSignalTimes);
+          
+          // Calculate stats from actual data points
+          const values = data.map(d => ('avg' in d ? d.avg : d.value));
+          const allMins = minsRaw && minsRaw.length ? minsRaw : values;
+          const allMaxs = maxsRaw && maxsRaw.length ? maxsRaw : values;
+          
+          // Debug: Log processed data for this signal
+          console.group(`🔍 Analog Signal ${idx + 1} - Processed Data: ${s.id || s.name || 'Unknown'}`);
+          console.log('API Avg Values:', avgRaw);
+          console.log('API Min Values:', minsRaw);
+          console.log('API Max Values:', maxsRaw);
+          console.log('API Timestamps:', signalTimes);
+          console.log('Normalized Timestamps (aligned to minutes):', normalizedSignalTimes);
+          console.log('Processed Data Points:', data);
+          console.log('Data Points Count:', data.length);
+          console.log('First 5 data points:', data.slice(0, 5));
+          console.log('Last 5 data points:', data.slice(-5));
+          console.log('Calculated Stats:', {
+            avg: values.length > 0 ? values.reduce((a: number, b: number) => a + b, 0) / values.length : 0,
+            min: allMins.length > 0 ? Math.min(...allMins) : 0,
+            max: allMaxs.length > 0 ? Math.max(...allMaxs) : 0
+          });
+          console.log('Y-Axis Range:', s.yAxisRange ? { min: Number(s.yAxisRange.min), max: Number(s.yAxisRange.max) } : { min: 0, max: 100 });
+          console.groupEnd();
+          
           return {
             id: String(s.id),
             name: String(s.name ?? s.id),
             unit: String(s.unit ?? ''),
             color: String(s.color ?? '#3b82f6'),
             data: data as any,
-            currentValue: Number(values.slice(-1)[0] ?? 0),
-            avg: values.length ? values.reduce((a: number, b: number) => a + b, 0) / values.length : 0,
-            min: values.length ? (minsScaled && minsScaled.length ? Math.min(...minsScaled) : Math.min(...values)) : 0,
-            max: values.length ? (maxsScaled && maxsScaled.length ? Math.max(...maxsScaled) : Math.max(...values)) : 0,
+            currentValue: values.length > 0 ? Number(values[values.length - 1]) : 0,
+            avg: values.length > 0 ? values.reduce((a: number, b: number) => a + b, 0) / values.length : 0,
+            min: allMins.length > 0 ? Math.min(...allMins) : 0,
+            max: allMaxs.length > 0 ? Math.max(...allMaxs) : 0,
             yAxisRange: s.yAxisRange ? { min: Number(s.yAxisRange.min), max: Number(s.yAxisRange.max) } : { min: 0, max: 100 }
           } as VehicleMetric;
         });
@@ -331,14 +445,42 @@ const VehicleDashboard: React.FC = () => {
         let perSecondDigitalMaxTs: number | null = null;
         // Digital per-second override
         if (!digitalChart.metrics.length && Array.isArray((payload as any).digitalPerSecond)) {
+          console.group('📡 Digital Per-Second Data - API Response');
+          console.log('Number of digital per-second series:', (payload.digitalPerSecond as Array<any>).length);
+          (payload.digitalPerSecond as Array<any>).forEach((series: any, idx: number) => {
+            console.group(`Digital Per-Second Series ${idx + 1}: ${series.id || series.name || 'Unknown'}`);
+            console.log('Raw API Data:', series);
+            console.log('Points count:', series.points?.length || 0);
+            console.log('First 3 points:', series.points?.slice(0, 3));
+            console.groupEnd();
+          });
+          console.groupEnd();
           const parseHMS = (hms: string) => {
             const [hh, mm, ss] = String(hms).split(':').map((n: string) => Number(n));
             const base = new Date(times[0] ?? Date.now());
             base.setHours(0, 0, 0, 0);
-            return new Date(base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000);
+            const timestamp = base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000;
+            // Align to minute boundary
+            return new Date(alignToMinute(timestamp));
           };
-          const metrics = (payload.digitalPerSecond as Array<any>).map((series: any) => {
-            const pts = (series.points || []).map((p: any) => ({ time: parseHMS(p.time), value: Number(p.value ?? 0) }));
+          const metrics = (payload.digitalPerSecond as Array<any>).map((series: any, idx: number) => {
+            // Use exact API values, align timestamps to minutes, sort
+            const pts = (series.points || []).map((p: any) => ({
+              time: parseHMS(p.time),
+              value: Number(p.value ?? 0)
+            }));
+            // Sort by timestamp
+            pts.sort((a: { time: Date; value: number }, b: { time: Date; value: number }) => a.time.getTime() - b.time.getTime());
+            
+            // Debug: Log processed per-second data
+            console.group(`🔍 Digital Per-Second Series ${idx + 1} - Processed Data: ${series.id || series.name || 'Unknown'}`);
+            console.log('API Points (raw):', series.points);
+            console.log('Processed Points:', pts);
+            console.log('Points Count:', pts.length);
+            console.log('First 5 points:', pts.slice(0, 5));
+            console.log('Last 5 points:', pts.slice(-5));
+            console.groupEnd();
+            
             if (pts.length) {
               const localMin = pts[0].time.getTime();
               const localMax = pts[pts.length - 1].time.getTime();
@@ -366,28 +508,58 @@ const VehicleDashboard: React.FC = () => {
             const [hh, mm, ss] = String(hms).split(':').map((n: string) => Number(n));
             const base = new Date(times[0] ?? Date.now());
             base.setHours(0, 0, 0, 0);
-            return new Date(base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000);
+            const timestamp = base.getTime() + hh * 3600000 + mm * 60000 + ss * 1000;
+            // Align to minute boundary
+            return new Date(alignToMinute(timestamp));
           };
           (payload.analogPerSecond as Array<any>).forEach(series => {
             const id = String(series.id);
-          const rawPts = (series.points || []).map((r: any) => ({ time: parseHMS(r.time), avg: Number(r.avg), min: Number(r.min), max: Number(r.max), hms: String(r.time) }));
-            const rawVals: number[] = [];
-            rawPts.forEach((p: { avg: number; min: number; max: number }) => { rawVals.push(p.avg, p.min, p.max); });
-            const scale = computeScale(rawVals, series.yAxisRange ? { min: Number(series.yAxisRange.min), max: Number(series.yAxisRange.max) } : undefined);
-            const pts = rawPts.map((p: { time: Date; avg: number; min: number; max: number; hms: string }) => ({ time: p.time, avg: p.avg * scale, min: p.min * scale, max: p.max * scale, rawAvg: p.avg, rawMin: p.min, rawMax: p.max, hms: p.hms }));
-            if (!pts.length) return;
-            const localMin = pts[0].time.getTime();
-            const localMax = pts[pts.length - 1].time.getTime();
+            // Use exact API values without scaling, align timestamps to minutes
+            const rawPts = (series.points || []).map((r: any) => {
+              const time = parseHMS(r.time);
+              return {
+                time,
+                avg: Number(r.avg),
+                min: Number(r.min),
+                max: Number(r.max),
+                hms: String(r.time)
+              };
+            });
+            
+            // Sort by timestamp
+            rawPts.sort((a: { time: Date; avg: number; min: number; max: number; hms: string }, b: { time: Date; avg: number; min: number; max: number; hms: string }) => a.time.getTime() - b.time.getTime());
+            
+            if (!rawPts.length) return;
+            const localMin = rawPts[0].time.getTime();
+            const localMax = rawPts[rawPts.length - 1].time.getTime();
             perSecondAnalogMinTs = perSecondAnalogMinTs === null ? localMin : Math.min(perSecondAnalogMinTs, localMin);
             perSecondAnalogMaxTs = perSecondAnalogMaxTs === null ? localMax : Math.max(perSecondAnalogMaxTs, localMax);
-            const values: number[] = pts.map((p: { avg: number }) => p.avg);
-            const usedRange = series.yAxisRange ? { min: Number(series.yAxisRange.min), max: Number(series.yAxisRange.max) } : { min: Math.min(...values), max: Math.max(...values) };
+            const values: number[] = rawPts.map((p: { time: Date; avg: number; min: number; max: number; hms: string }) => p.avg);
+            const allMins = rawPts.map((p: { time: Date; avg: number; min: number; max: number; hms: string }) => p.min);
+            const allMaxs = rawPts.map((p: { time: Date; avg: number; min: number; max: number; hms: string }) => p.max);
+            const usedRange = series.yAxisRange ? { min: Number(series.yAxisRange.min), max: Number(series.yAxisRange.max) } : { min: Math.min(...allMins), max: Math.max(...allMaxs) };
+            
+            // Debug: Log processed per-second data
+            console.group(`🔍 Analog Per-Second Series - Processed Data: ${id}`);
+            console.log('API Points (raw):', series.points);
+            console.log('Processed Points:', rawPts);
+            console.log('Points Count:', rawPts.length);
+            console.log('First 5 points:', rawPts.slice(0, 5));
+            console.log('Last 5 points:', rawPts.slice(-5));
+            console.log('Calculated Stats:', {
+              avg: values.reduce((a: number, b: number) => a + b, 0) / values.length,
+              min: Math.min(...allMins),
+              max: Math.max(...allMaxs)
+            });
+            console.log('Y-Axis Range:', usedRange);
+            console.groupEnd();
+            
             const existing = analogMetrics.find(m => m.id === id);
             if (existing) {
-              (existing as any).data = pts;
+              (existing as any).data = rawPts;
               existing.avg = values.reduce((a: number, b: number) => a + b, 0) / values.length;
-              existing.min = Math.min(...values);
-              existing.max = Math.max(...values);
+              existing.min = Math.min(...allMins);
+              existing.max = Math.max(...allMaxs);
               (existing as any).yAxisRange = usedRange;
             } else {
               analogMetrics.push({
@@ -395,11 +567,11 @@ const VehicleDashboard: React.FC = () => {
                 name: String(series.name ?? id),
                 unit: String(series.unit ?? ''),
                 color: String(series.color ?? '#2563eb'),
-                data: pts as any,
+                data: rawPts as any,
                 currentValue: values[values.length - 1] ?? 0,
                 avg: values.reduce((a: number, b: number) => a + b, 0) / values.length,
-                min: Math.min(...values),
-                max: Math.max(...values),
+                min: Math.min(...allMins),
+                max: Math.max(...allMaxs),
                 yAxisRange: usedRange
               });
             }
@@ -410,6 +582,28 @@ const VehicleDashboard: React.FC = () => {
         if ((!times || !times.length) && (!digitalChart.metrics.length && !analogMetrics.length)) {
           throw new Error('invalid');
         }
+
+        // Debug: Final data being set to state
+        console.group('✅ Final Data - Ready for Charts');
+        console.log('Analog Metrics Count:', analogMetrics.length);
+        analogMetrics.forEach((metric, idx) => {
+          console.group(`Final Analog Metric ${idx + 1}: ${metric.id} - ${metric.name}`);
+          console.log('Data points count:', metric.data.length);
+          console.log('First 3 data points:', metric.data.slice(0, 3));
+          console.log('Last 3 data points:', metric.data.slice(-3));
+          console.log('Stats:', { avg: metric.avg, min: metric.min, max: metric.max });
+          console.log('Y-Axis Range:', metric.yAxisRange);
+          console.groupEnd();
+        });
+        console.log('Digital Chart Metrics Count:', digitalChart.metrics.length);
+        digitalChart.metrics.forEach((metric, idx) => {
+          console.group(`Final Digital Metric ${idx + 1}: ${metric.id} - ${metric.name}`);
+          console.log('Data points count:', metric.data.length);
+          console.log('First 3 data points:', metric.data.slice(0, 3));
+          console.log('Last 3 data points:', metric.data.slice(-3));
+          console.groupEnd();
+        });
+        console.groupEnd();
 
         setVehicleMetrics(analogMetrics);
         setDigitalStatusChart(digitalChart);
@@ -661,37 +855,43 @@ const VehicleDashboard: React.FC = () => {
         {loading && (
           <div className={styles.loaderOverlay}>
             <div className={styles.loader}>
-              <div className={styles.loaderRing} />
-              <div className={styles.loaderDot} />
+              <div className={styles.loaderSpinner}>
+                <div className={styles.spinnerRing}></div>
+                <div className={styles.spinnerRing}></div>
+                <div className={styles.spinnerRing}></div>
+              </div>
+              <div className={styles.loaderText}>Loading data...</div>
             </div>
           </div>
         )}
-        {/* Digital Signal Timeline Chart */}
-        {digitalStatusChart && digitalStatusChart.metrics.length > 0 && (
-          <DigitalSignalTimeline
-            signals={digitalStatusChart.metrics}
-            selectedTime={selectedTime}
-            crosshairActive={crosshairActive}
-            timeDomain={timeDomain}
-          />
-        )}
-
-        {/* Analog Charts */}
-        <div className={styles.chartsContainer}>
-          {vehicleMetrics.map(metric => (
-            <AnalogChart
-              key={metric.id}
-              id={metric.id}
-              name={metric.name}
-              unit={metric.unit}
-              color={metric.color}
-              data={metric.data}
-              yAxisRange={metric.yAxisRange}
+        <div className={styles.scrollContent}>
+          {/* Digital Signal Timeline Chart */}
+          {digitalStatusChart && digitalStatusChart.metrics.length > 0 && (
+            <DigitalSignalTimeline
+              signals={digitalStatusChart.metrics}
               selectedTime={selectedTime}
               crosshairActive={crosshairActive}
               timeDomain={timeDomain}
             />
-          ))}
+          )}
+
+          {/* Analog Charts */}
+          <div className={styles.chartsContainer}>
+            {vehicleMetrics.map(metric => (
+              <AnalogChart
+                key={metric.id}
+                id={metric.id}
+                name={metric.name}
+                unit={metric.unit}
+                color={metric.color}
+                data={metric.data}
+                yAxisRange={metric.yAxisRange}
+                selectedTime={selectedTime}
+                crosshairActive={crosshairActive}
+                timeDomain={timeDomain}
+              />
+            ))}
+          </div>
         </div>
       </div>
     </div>

@@ -219,16 +219,34 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
       t = Math.max(selectionStart, Math.min(selectionEnd, t));
     }
     onTimeChange(t);
+    
+    let rafId: number | null = null;
+    let lastTime = t;
     const onMove = (ev: MouseEvent) => {
       ev.preventDefault();
       if (!knobDraggingRef.current) return;
-      let t2 = timeFromClientX(ev.clientX);
-      if (selectionStart !== null && selectionEnd !== null) {
-        t2 = Math.max(selectionStart, Math.min(selectionEnd, t2));
-      }
-      onTimeChange(t2);
+      
+      // Throttle using requestAnimationFrame
+      if (rafId !== null) return;
+      
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        let t2 = timeFromClientX(ev.clientX);
+        if (selectionStart !== null && selectionEnd !== null) {
+          t2 = Math.max(selectionStart, Math.min(selectionEnd, t2));
+        }
+        // Only update if time changed significantly (avoid micro-movements)
+        if (Math.abs(t2 - lastTime) > 100) {
+          lastTime = t2;
+          onTimeChange(t2);
+        }
+      });
     };
     const onUp = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       knobDraggingRef.current = false;
       isDraggingRef.current = false;
       document.body.style.userSelect = prevUserSelect;
@@ -246,16 +264,31 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     e.preventDefault();
     const startX = e.clientX;
     const startStart = selectionStart ?? timeDomain[0];
+    let rafId: number | null = null;
+    let lastStart = startStart;
     const onMove = (ev: MouseEvent) => {
       ev.preventDefault();
-      let newStart = timeFromClientX(ev.clientX);
-      const end = selectionEnd ?? timeDomain[1];
-      // Enforce minimum 1 hour
-      if (end - newStart < MIN_RANGE) newStart = end - MIN_RANGE;
-      newStart = clampToDay(newStart);
-      onSelectionChange(newStart, end);
+      // Throttle using requestAnimationFrame
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        let newStart = timeFromClientX(ev.clientX);
+        const end = selectionEnd ?? timeDomain[1];
+        // Enforce minimum 1 hour
+        if (end - newStart < MIN_RANGE) newStart = end - MIN_RANGE;
+        newStart = clampToDay(newStart);
+        // Only update if position changed significantly
+        if (Math.abs(newStart - lastStart) > 100) {
+          lastStart = newStart;
+          onSelectionChange(newStart, end);
+        }
+      });
     };
     const onUp = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -265,15 +298,30 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
 
   const onRightHandleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
+    const start = selectionStart ?? timeDomain[0];
+    let rafId: number | null = null;
+    let lastEnd = selectionEnd ?? timeDomain[1];
     const onMove = (ev: MouseEvent) => {
       ev.preventDefault();
-      const start = selectionStart ?? timeDomain[0];
-      let newEnd = timeFromClientX(ev.clientX);
-      if (newEnd - start < MIN_RANGE) newEnd = start + MIN_RANGE;
-      newEnd = clampToDay(newEnd);
-      onSelectionChange(start, newEnd);
+      // Throttle using requestAnimationFrame
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        let newEnd = timeFromClientX(ev.clientX);
+        if (newEnd - start < MIN_RANGE) newEnd = start + MIN_RANGE;
+        newEnd = clampToDay(newEnd);
+        // Only update if position changed significantly
+        if (Math.abs(newEnd - lastEnd) > 100) {
+          lastEnd = newEnd;
+          onSelectionChange(start, newEnd);
+        }
+      });
     };
     const onUp = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };

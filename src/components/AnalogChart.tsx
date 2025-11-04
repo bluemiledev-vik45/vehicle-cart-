@@ -38,14 +38,20 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
   perSecondStats,
 }) => {
   const chartData = useMemo(() => {
+    // Convert data points to chart format using EXACT API values (no decimation, no smoothing)
     const toPoint = (d: any) => {
       const avg = d.avg ?? d.value;
       const min = d.min ?? d.value;
       const max = d.max ?? d.value;
-      return { time: d.time.getTime(), avg, min, max };
+      return { 
+        time: d.time.getTime(), 
+        avg: Number(avg), 
+        min: Number.isFinite(Number(min)) ? Number(min) : avg, 
+        max: Number.isFinite(Number(max)) ? Number(max) : avg 
+      };
     };
 
-    // 1) Filter to visible domain with small padding to avoid gaps at edges
+    // Filter to visible domain with small padding to avoid gaps at edges
     const PAD = 5 * 60 * 1000; // 5 min pad
     const filtered = (() => {
       if (!timeDomain) return data.map(toPoint);
@@ -60,41 +66,16 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
         .map(toPoint);
     })();
 
-    // 2) Decimate to a manageable number of points (SVG-friendly)
-    const MAX_POINTS = 1500;
-    if (filtered.length <= MAX_POINTS) {
-      return filtered.map(p => ({
-        time: p.time,
-        avg: p.avg,
-        min: p.min,
-        max: p.max,
-        deltaTop: p.max - p.avg,
-        deltaBottom: -(p.avg - p.min)
-      }));
-    }
-
-    const bucketSize = Math.ceil(filtered.length / MAX_POINTS);
-    const out: Array<{ time: number; avg: number; min: number; max: number; deltaTop: number; deltaBottom: number }> = [];
-    for (let i = 0; i < filtered.length; i += bucketSize) {
-      const bucket = filtered.slice(i, i + bucketSize);
-      let min = Infinity, max = -Infinity, sum = 0;
-      const t = bucket[0].time;
-      for (const p of bucket) {
-        if (p.min < min) min = p.min;
-        if (p.max > max) max = p.max;
-        sum += p.avg;
-      }
-      const avg = sum / bucket.length;
-      out.push({
-        time: t,
-        avg,
-        min,
-        max,
-        deltaTop: max - avg,
-        deltaBottom: -(avg - min)
-      });
-    }
-    return out;
+    // Use ALL data points - no decimation, no bucketing, no averaging
+    // This ensures exact API values are displayed
+    return filtered.map(p => ({
+      time: p.time,
+      avg: p.avg,
+      min: p.min,
+      max: p.max,
+      deltaTop: p.max - p.avg,
+      deltaBottom: -(p.avg - p.min)
+    }));
   }, [data, timeDomain]);
 
   // Build a per-second lookup map from the original data to preserve exact second stats
@@ -161,21 +142,50 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
   // Hover tooltip removed per requirement
 
   const visibleStats = useMemo(() => {
-    const compute = (arr: Array<{ avg: number }>) => {
-      if (!arr.length) return { avg: 0, min: 0, max: 0 };
-      const values = arr.map(d => d.avg);
-      return {
-        avg: values.reduce((a, b) => a + b, 0) / values.length,
-        min: Math.min(...values),
-        max: Math.max(...values),
-      };
+    // Compute stats from original data (per-minute) not decimated chartData
+    // This ensures accurate Min/Max/Avg values from actual API data
+    const getValue = (d: any): { avg: number; min: number; max: number } => {
+      const avg = Number(d.avg ?? d.value ?? 0);
+      const min = Number(d.min ?? d.value ?? avg);
+      const max = Number(d.max ?? d.value ?? avg);
+      return { avg, min, max };
     };
 
-    if (!timeDomain) return compute(chartData);
+    let filtered = data;
+    if (timeDomain) {
+      filtered = data.filter((d: any) => {
+        const t = d.time.getTime();
+        return t >= timeDomain[0] && t <= timeDomain[1];
+      });
+    }
 
-    const visibleData = chartData.filter(d => d.time >= timeDomain[0] && d.time <= timeDomain[1]);
-    return visibleData.length ? compute(visibleData) : compute(chartData);
-  }, [chartData, timeDomain]);
+    if (!filtered.length) {
+      // Fallback to all data
+      filtered = data;
+    }
+
+    if (!filtered.length) return { avg: 0, min: 0, max: 0 };
+
+    // Collect all avg, min, max values from actual data points
+    const allAvgs: number[] = [];
+    const allMins: number[] = [];
+    const allMaxs: number[] = [];
+
+    filtered.forEach((d: any) => {
+      const vals = getValue(d);
+      if (Number.isFinite(vals.avg)) allAvgs.push(vals.avg);
+      if (Number.isFinite(vals.min)) allMins.push(vals.min);
+      if (Number.isFinite(vals.max)) allMaxs.push(vals.max);
+    });
+
+    if (allAvgs.length === 0) return { avg: 0, min: 0, max: 0 };
+
+    return {
+      avg: allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length,
+      min: allMins.length > 0 ? Math.min(...allMins) : Math.min(...allAvgs),
+      max: allMaxs.length > 0 ? Math.max(...allMaxs) : Math.max(...allAvgs),
+    };
+  }, [data, timeDomain]);
 
   const xDomain = useMemo(() => {
     if (!chartData.length) return ['dataMin', 'dataMax'] as const;
@@ -248,14 +258,18 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
               tick={{ fill: '#6b7280', fontSize: 9 }}
             />
             <YAxis
-              domain={[yAxisRange.min, yAxisRange.max]}
+              domain={[yAxisRange.min, yAxisRange.max] as [number, number]}
+              allowDataOverflow={true}
+              allowDecimals={true}
+              type="number"
               tick={{ fill: '#6b7280', fontSize: 10 }}
               width={140}
               label={{ value: unit, angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
             />
             {/* Tooltip removed */}
             {/* Show only avg line; min/max colored areas removed per request */}
-            <Line type="monotone" dataKey="avg" stroke={color} strokeWidth={2} dot={false} activeDot={{ r: 4, fill: color }} isAnimationActive={false} />
+            {/* type="linear" instead of "monotone" to disable smoothing and show exact values */}
+            <Line type="linear" dataKey="avg" stroke={color} strokeWidth={2} dot={false} activeDot={{ r: 4, fill: color }} isAnimationActive={false} connectNulls={false} />
             {crosshairActive && selectedTime && (
               <ReferenceLine
                 x={selectedTime.getTime()}

@@ -54,35 +54,52 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
     const lo = startTs - PAD;
     const hi = endTs + PAD;
 
-    // Build list of visible times from first signal (assumed common grid)
-    let times = signals[0].data
-      .map(d => d.time.getTime())
-      .filter(t => t >= lo && t <= hi);
+    // Collect ALL unique timestamps from ALL signals (no decimation)
+    const allTimesSet = new Set<number>();
+    signals.forEach(signal => {
+      signal.data.forEach(d => {
+        const t = d.time.getTime();
+        if (t >= lo && t <= hi) {
+          allTimesSet.add(t);
+        }
+      });
+    });
 
-    // Decimate if too dense
-    const MAX_POINTS = 1200;
-    if (times.length > MAX_POINTS) {
-      const stride = Math.ceil(times.length / MAX_POINTS);
-      times = times.filter((_, idx) => idx % stride === 0);
-    }
+    // Convert to sorted array
+    const allTimes = Array.from(allTimesSet).sort((a, b) => a - b);
 
+    // Build data points using EXACT API values (no nearest neighbor interpolation)
     const dataMap = new Map<number, ChartDataPoint>();
-    times.forEach(t => {
+    
+    allTimes.forEach(t => {
       const point: ChartDataPoint = { time: t };
       signals.forEach((signal, index) => {
-        // Find nearest sample to t
-        let nearest = signal.data[0];
-        let minDiff = Math.abs(nearest.time.getTime() - t);
-        for (const s of signal.data) {
-          const diff = Math.abs(s.time.getTime() - t);
-          if (diff < minDiff) { minDiff = diff; nearest = s; }
+        // Find exact match first, or use the exact value at that timestamp
+        const exactMatch = signal.data.find(d => d.time.getTime() === t);
+        if (exactMatch) {
+          point[signal.id] = exactMatch.value === 1 ? index : index - 0.5;
+        } else {
+          // If no exact match, find the closest point (but don't interpolate)
+          let closest = signal.data[0];
+          let minDiff = Math.abs(closest.time.getTime() - t);
+          for (const s of signal.data) {
+            const diff = Math.abs(s.time.getTime() - t);
+            if (diff < minDiff) {
+              minDiff = diff;
+              closest = s;
+            }
+          }
+          // Only use if within 30 seconds (half a minute)
+          if (minDiff <= 30000) {
+            point[signal.id] = closest.value === 1 ? index : index - 0.5;
+          }
         }
-        point[signal.id] = nearest?.value === 1 ? index : index - 0.5;
       });
       dataMap.set(t, point);
     });
 
-    return Array.from(dataMap.values()).sort((a, b) => a.time - b.time);
+    // Return sorted by timestamp (already sorted from allTimes, but ensure)
+    return Array.from(dataMap.values()).sort((a, b) => a.time! - b.time!);
   }, [signals, timeDomain]);
 
   const formatTime = (tickItem: number) => {

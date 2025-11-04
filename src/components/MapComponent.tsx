@@ -185,13 +185,7 @@ const MapComponent: React.FC = () => {
 
   return (
     <div className={styles.mapContainer}>
-      <div className={styles.mapHeader}>
-        <h3 className={styles.mapTitle}>Vehicle Locations</h3>
-        <div className={styles.mapControls}>
-          <span className={styles.activeIndicator}>● Active</span>
-          <span className={styles.maintenanceIndicator}>● Maintenance</span>
-        </div>
-      </div>
+    
       
       <MapContainer
         center={currentPosition ?? center}
