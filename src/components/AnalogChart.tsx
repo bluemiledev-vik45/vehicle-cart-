@@ -115,7 +115,12 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     if (perSecondMap.size > 0) {
       const key = format(time, 'HH:mm:ss');
       const hit = perSecondMap.get(key);
-      if (hit) return { time: time.getTime(), avg: hit.avg, min: hit.min, max: hit.max };
+      if (hit) {
+        const avg = Number.isFinite(hit.avg) && !isNaN(hit.avg) ? hit.avg : 0;
+        const min = Number.isFinite(hit.min) && !isNaN(hit.min) ? hit.min : avg;
+        const max = Number.isFinite(hit.max) && !isNaN(hit.max) ? hit.max : avg;
+        return { time: time.getTime(), avg, min, max };
+      }
     }
 
     let closest = chartData[0];
@@ -134,9 +139,15 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
     if (minDiff > tolerance) return null;
     const c: any = closest;
     const avg: number = Number(c.avg);
-    const min: number = Number.isFinite(Number(c.min)) ? Number(c.min) : avg;
-    const max: number = Number.isFinite(Number(c.max)) ? Number(c.max) : avg;
-    return { time: c.time, avg, min, max };
+    const min: number = Number.isFinite(Number(c.min)) && !isNaN(Number(c.min)) ? Number(c.min) : (Number.isFinite(avg) && !isNaN(avg) ? avg : 0);
+    const max: number = Number.isFinite(Number(c.max)) && !isNaN(Number(c.max)) ? Number(c.max) : (Number.isFinite(avg) && !isNaN(avg) ? avg : 0);
+    
+    // Final validation
+    const finalAvg = Number.isFinite(avg) && !isNaN(avg) ? avg : 0;
+    const finalMin = Number.isFinite(min) && !isNaN(min) ? min : finalAvg;
+    const finalMax = Number.isFinite(max) && !isNaN(max) ? max : finalAvg;
+    
+    return { time: c.time, avg: finalAvg, min: finalMin, max: finalMax };
   };
 
   // Hover tooltip removed per requirement
@@ -144,11 +155,26 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
   const visibleStats = useMemo(() => {
     // Compute stats from original data (per-minute) not decimated chartData
     // This ensures accurate Min/Max/Avg values from actual API data
-    const getValue = (d: any): { avg: number; min: number; max: number } => {
-      const avg = Number(d.avg ?? d.value ?? 0);
-      const min = Number(d.min ?? d.value ?? avg);
-      const max = Number(d.max ?? d.value ?? avg);
-      return { avg, min, max };
+    const getValue = (d: any): { avg: number; min: number; max: number } | null => {
+      // Handle string values from API (e.g., "102" -> 102)
+      const avgRaw = d.avg ?? d.value;
+      const minRaw = d.min;
+      const maxRaw = d.max;
+      
+      const avg = Number(avgRaw);
+      const min = minRaw != null ? Number(minRaw) : avg;
+      const max = maxRaw != null ? Number(maxRaw) : avg;
+      
+      // Return null if avg is invalid (will filter out)
+      if (!Number.isFinite(avg) || isNaN(avg)) {
+        return null;
+      }
+      
+      return {
+        avg,
+        min: Number.isFinite(min) && !isNaN(min) ? min : avg,
+        max: Number.isFinite(max) && !isNaN(max) ? max : avg,
+      };
     };
 
     let filtered = data;
@@ -166,24 +192,31 @@ const AnalogChart: React.FC<AnalogChartProps> = ({
 
     if (!filtered.length) return { avg: 0, min: 0, max: 0 };
 
-    // Collect all avg, min, max values from actual data points
+    // Collect all avg, min, max values from actual data points - filter out invalid
     const allAvgs: number[] = [];
     const allMins: number[] = [];
     const allMaxs: number[] = [];
 
     filtered.forEach((d: any) => {
       const vals = getValue(d);
-      if (Number.isFinite(vals.avg)) allAvgs.push(vals.avg);
-      if (Number.isFinite(vals.min)) allMins.push(vals.min);
-      if (Number.isFinite(vals.max)) allMaxs.push(vals.max);
+      if (vals) {
+        if (Number.isFinite(vals.avg) && !isNaN(vals.avg)) allAvgs.push(vals.avg);
+        if (Number.isFinite(vals.min) && !isNaN(vals.min)) allMins.push(vals.min);
+        if (Number.isFinite(vals.max) && !isNaN(vals.max)) allMaxs.push(vals.max);
+      }
     });
 
     if (allAvgs.length === 0) return { avg: 0, min: 0, max: 0 };
 
+    const avg = allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length;
+    const min = allMins.length > 0 ? Math.min(...allMins) : (allAvgs.length > 0 ? Math.min(...allAvgs) : 0);
+    const max = allMaxs.length > 0 ? Math.max(...allMaxs) : (allAvgs.length > 0 ? Math.max(...allAvgs) : 0);
+
+    // Final validation to prevent NaN
     return {
-      avg: allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length,
-      min: allMins.length > 0 ? Math.min(...allMins) : Math.min(...allAvgs),
-      max: allMaxs.length > 0 ? Math.max(...allMaxs) : Math.max(...allAvgs),
+      avg: Number.isFinite(avg) && !isNaN(avg) ? avg : 0,
+      min: Number.isFinite(min) && !isNaN(min) ? min : 0,
+      max: Number.isFinite(max) && !isNaN(max) ? max : 0,
     };
   }, [data, timeDomain]);
 

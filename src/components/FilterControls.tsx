@@ -5,7 +5,8 @@ const FilterControls: React.FC = () => {
   type Vehicle = { id: string; rego: string };
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>('');
-  const [selectedDate, setSelectedDate] = useState<string>('2025-10-27');
+  const [dates, setDates] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string>('');
 
   // Initialize from URL params
   useEffect(() => {
@@ -41,13 +42,41 @@ const FilterControls: React.FC = () => {
     return () => { aborted = true; };
   }, [selectedVehicleId]);
 
-  const onShow = () => {
+  // Fetch dates when vehicle changes
+  useEffect(() => {
+    let aborted = false;
+    const loadDates = async () => {
+      if (!selectedVehicleId) { setDates([]); setSelectedDate(''); return; }
+      try {
+        const url = `https://www.no-reply.com.au/smart_data_link/get-dates-by-vehicles-id?vehicles_id=${selectedVehicleId}`;
+        const res = await fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+        if (!res.ok) throw new Error('bad');
+        const json = await res.json();
+        let arr: string[] = [];
+        const payload: any = (json && typeof json === 'object' && 'data' in json) ? (json as any).data : json;
+        if (Array.isArray(payload)) arr = payload.map((d: any) => String(d)).filter((d: string) => d.length > 0);
+        arr.sort((a, b) => b.localeCompare(a));
+        if (aborted) return;
+        setDates(arr);
+        if (arr.length) setSelectedDate(arr[0]); else setSelectedDate('');
+      } catch (e) {
+        if (!aborted) { setDates([]); setSelectedDate(''); }
+      }
+    };
+    loadDates();
+    return () => { aborted = true; };
+  }, [selectedVehicleId]);
+
+  // Apply when both selected
+  useEffect(() => {
+    if (!selectedVehicleId || !selectedDate) return;
     const params = new URLSearchParams(window.location.search);
-    if (selectedVehicleId) params.set('device_id', selectedVehicleId);
-    if (selectedDate) params.set('date', selectedDate);
-    // preserve existing params like manual_reading_ids
-    window.location.search = params.toString();
-  };
+    params.set('device_id', selectedVehicleId);
+    params.set('date', selectedDate);
+    const newUrl = `${window.location.pathname}?${params.toString()}`;
+    window.history.pushState({}, '', newUrl);
+    window.dispatchEvent(new CustomEvent('filters:apply', { detail: { device_id: selectedVehicleId, date: selectedDate } }));
+  }, [selectedVehicleId, selectedDate]);
 
   return (
     <div className={styles.filterControls}>
@@ -65,16 +94,19 @@ const FilterControls: React.FC = () => {
             ))}
           </select>
           
-          <input 
-            type="date" 
-            className={styles.dateInput}
+          <select 
+            className={styles.select}
             value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
-          />
-          
-          <button className={styles.showButton} onClick={onShow}>Show</button>
-          <button className={styles.filterButton}>Additional Filters</button>
-          <span className={styles.clearFilter}>Clear filter</span>
+            disabled={!selectedVehicleId}
+          >
+            <option value="">Select Date</option>
+            {dates.map(d => (
+              <option key={d} value={d}>{d}</option>
+            ))}
+          </select>
+
+          <button className={styles.filterButton} onClick={() => window.dispatchEvent(new CustomEvent('filters:open'))}>Additional Filters</button>
         </div>
         
       
@@ -82,7 +114,7 @@ const FilterControls: React.FC = () => {
         <div className={styles.rightControls}>
           <div className={styles.actionButtons}>
             <button className={styles.actionBtn}>Table</button>
-            <button className={styles.actionBtn}>Print</button>
+            <button className={styles.actionBtn} onClick={() => window.print()}>Print</button>
           </div>
           
         

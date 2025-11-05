@@ -26,7 +26,7 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
         setLoadingVehicles(true);
         setError(''); // Clear previous errors
         
-        // Try the API endpoint
+        // Vehicles endpoint
         const apiUrl = 'https://www.no-reply.com.au/smart_data_link/get-vehicles';
         console.log('🔗 Fetching vehicles from:', apiUrl);
         
@@ -137,14 +137,18 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
           
           console.log('📅 Processed dates:', datesData);
           
-          if (datesData.length === 0) {
-            throw new Error('No dates found for this vehicle');
-          }
-          
+          // Don't show error if no dates found, just set empty array
           setDates(datesData);
+          setError(''); // Clear any previous errors on successful fetch
         } catch (err: any) {
+          // Only show error for actual API failures, not for empty responses
           const errorMsg = err.message || 'Failed to load dates. Please check the API endpoint.';
-          setError(errorMsg);
+          // Don't show error for "No dates found" - just log it
+          if (!errorMsg.includes('No dates found')) {
+            setError(errorMsg);
+          } else {
+            setError('');
+          }
           console.error('❌ Error fetching dates:', err);
           console.error('Error details:', {
             message: err.message,
@@ -188,7 +192,10 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
           <select
             className={styles.select}
             value={selectedVehicleId || ''}
-            onChange={(e) => setSelectedVehicleId(Number(e.target.value))}
+            onChange={(e) => {
+              setSelectedVehicleId(Number(e.target.value));
+              setError(''); // Clear error when vehicle changes
+            }}
             disabled={loadingVehicles}
           >
             <option value="">Select Asset</option>

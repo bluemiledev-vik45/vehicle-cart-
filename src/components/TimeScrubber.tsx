@@ -23,6 +23,7 @@ const BASE_LEFT_MARGIN = 20; // same as charts
 const RIGHT_MARGIN = 30;     // same as charts
 const Y_AXIS_LEFT_WIDTH = 140; // align with widest chart YAxis (Digital timeline)
 const ALIGN_TWEAK_PX = 4;    // fine-tune to match chart plotting origin exactly
+const POINTER_ALIGN_TWEAK_PX = 3; // nudge so icon sits exactly under ReferenceLine across DPRs
 const CHART_LEFT_OFFSET = BASE_LEFT_MARGIN + Y_AXIS_LEFT_WIDTH + ALIGN_TWEAK_PX;
 
 const TimeScrubber: React.FC<TimeScrubberProps> = ({
@@ -193,6 +194,12 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     return arr;
   }, [timeDomain]);
 
+  // Snap time to nearest minute for minute-by-minute movement
+  const snapToMinute = useCallback((t: number) => {
+    const minuteMs = 60 * 1000;
+    return Math.round(t / minuteMs) * minuteMs;
+  }, []);
+
   const timeFromClientX = useCallback((clientX: number) => {
     const el = overlayRef.current;
     if (!el) return selectedTime ?? timeDomain[0];
@@ -201,8 +208,9 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     const raw = (clientX - rect.left - CHART_LEFT_OFFSET) / innerWidth;
     const p = Math.max(0, Math.min(1, raw));
     const t = timeDomain[0] + p * (timeDomain[1] - timeDomain[0]);
-    return clampToDay(Math.round(t));
-  }, [selectedTime, timeDomain]);
+    const clamped = clampToDay(t);
+    return snapToMinute(clamped);
+  }, [selectedTime, timeDomain, snapToMinute]);
 
   const onKnobMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -218,6 +226,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
     if (selectionStart !== null && selectionEnd !== null) {
       t = Math.max(selectionStart, Math.min(selectionEnd, t));
     }
+    t = snapToMinute(t);
     onTimeChange(t);
     
     let rafId: number | null = null;
@@ -235,8 +244,9 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
         if (selectionStart !== null && selectionEnd !== null) {
           t2 = Math.max(selectionStart, Math.min(selectionEnd, t2));
         }
-        // Only update if time changed significantly (avoid micro-movements)
-        if (Math.abs(t2 - lastTime) > 100) {
+        t2 = snapToMinute(t2);
+        // Only update if time changed to a different minute
+        if (t2 !== lastTime) {
           lastTime = t2;
           onTimeChange(t2);
         }
@@ -381,7 +391,7 @@ const TimeScrubber: React.FC<TimeScrubberProps> = ({
           {selectedLeftPx !== null && (
             <div
               className={styles.vehiclePointer}
-              style={{ left: `${selectedLeftPx}px` }}
+              style={{ left: `${selectedLeftPx + POINTER_ALIGN_TWEAK_PX}px`, transform: 'translateX(-50%)' }}
               onMouseDown={onKnobMouseDown}
               title="Drag to set time"
             >
