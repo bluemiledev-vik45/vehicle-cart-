@@ -242,19 +242,15 @@ const VehicleDashboard: React.FC = () => {
     const load = async () => {
       try {
         setLoading(true);
-        // Use the selected vehicle ID and date in the API call
+        // Use the get_charts_data_1 API endpoint without any parameters
         let json: any;
         try {
-          // Use the correct API endpoint: https://www.smartdatalink.com.au/get-data-by-devices-id-and-date
-          const apiUrl = new URL('https://www.smartdatalink.com.au/get-data-by-devices-id-and-date');
-          // Add id and date as query parameters
-          apiUrl.searchParams.set('id', selectedVehicleId.toString());
-          apiUrl.searchParams.set('date', selectedDate);
+          // Use the get_charts_data_1 API endpoint - no query parameters needed
+          const apiUrl = 'https://no-reply.com.au/smart_data_link/get_charts_data_1';
           
-          console.log('🔗 Fetching from API endpoint:', apiUrl.toString());
-          console.log('Vehicle ID:', selectedVehicleId, 'Date:', selectedDate);
+          console.log('🔗 Fetching from API endpoint:', apiUrl);
           
-          const apiRes = await fetch(apiUrl.toString(), {
+          const apiRes = await fetch(apiUrl, {
             headers: { 'Accept': 'application/json' },
             cache: 'no-store',
             mode: 'cors'
@@ -281,7 +277,7 @@ const VehicleDashboard: React.FC = () => {
             : err.message;
           
           setLoading(false);
-          alert(`Failed to load chart data from API.\n\nEndpoint: https://www.smartdatalink.com.au/get-data-by-devices-id-and-date\nVehicle ID: ${selectedVehicleId}\nDate: ${selectedDate}\n\nError: ${errorMsg}\n\nPossible issues:\n- CORS policy blocking the request\n- Network connectivity\n- API endpoint may require different authentication\n- Date format may need adjustment\n\nPlease check the browser console for more details.`);
+          alert(`Failed to load chart data from API.\n\nEndpoint: https://no-reply.com.au/smart_data_link/get_charts_data_1\n\nError: ${errorMsg}\n\nPossible issues:\n- CORS policy blocking the request\n- Network connectivity\n- API endpoint may require different authentication\n\nPlease check the browser console for more details.`);
           throw err;
         }
         // Unwrap common API envelope { status, message, data }
@@ -294,9 +290,17 @@ const VehicleDashboard: React.FC = () => {
         console.log('Payload keys:', typeof payload === 'object' && payload !== null ? Object.keys(payload) : 'N/A');
         console.groupEnd();
         
-        // The API response structure is: { status, message, data: { times, digitalPerSecond, analogPerSecond, gpsPerSecond } }
-        // Handle null values from API (when no data available)
-        if (payload && payload.times === null && payload.digitalPerSecond === null && payload.analogPerSecond === null) {
+        // The get_charts_data_1 API structure: { data: { times, analogSignals, digitalSignals, ... } }
+        // Check if payload has the expected structure for get_charts_data_1
+        const hasGetChartsDataStructure = payload && (
+          Array.isArray(payload.analogSignals) || 
+          Array.isArray(payload.digitalSignals) ||
+          Array.isArray(payload.times)
+        );
+        
+        // Handle null values from API (when no data available) - only for the new API format
+        const isNewApiFormat = payload && payload.times === null && payload.digitalPerSecond === null && payload.analogPerSecond === null && !hasGetChartsDataStructure;
+        if (isNewApiFormat) {
           console.warn('⚠️ API returned null data - showing empty charts');
           console.log('API Response:', { status: json.status, message: json.message, data: payload });
           
@@ -453,12 +457,39 @@ const VehicleDashboard: React.FC = () => {
           return Math.floor(timestampMs / 60000) * 60000;
         };
 
-        const timesRaw: any[] = Array.isArray(pick('times', 'timeStamps', 'timestamps')) ? pick('times', 'timeStamps', 'timestamps') : [];
+        // Get times array - handle both direct array and nested in data
+        const timesRaw: any[] = Array.isArray(pick('times', 'timeStamps', 'timestamps')) 
+          ? pick('times', 'timeStamps', 'timestamps') 
+          : [];
+        
+        // If times array is empty, try to extract from first signal if available
+        if (!timesRaw.length && payload) {
+          const firstAnalog = Array.isArray(payload.analogSignals) && payload.analogSignals.length > 0 
+            ? payload.analogSignals[0] 
+            : null;
+          const firstDigital = Array.isArray(payload.digitalSignals) && payload.digitalSignals.length > 0 
+            ? payload.digitalSignals[0] 
+            : null;
+          
+          if (firstAnalog?.times && Array.isArray(firstAnalog.times)) {
+            timesRaw.push(...firstAnalog.times);
+          } else if (firstDigital?.times && Array.isArray(firstDigital.times)) {
+            timesRaw.push(...firstDigital.times);
+          }
+        }
+        
         const times: number[] = timesRaw
           .map(parseTimestampToMs)
           .filter((n: number) => Number.isFinite(n))
           .map(alignToMinute)
           .sort((a, b) => a - b); // Sort ascending
+        
+        console.log('📅 Times array:', {
+          rawCount: timesRaw.length,
+          processedCount: times.length,
+          firstFew: times.slice(0, 5),
+          lastFew: times.slice(-5)
+        });
 
         // Create series mapping function that uses exact API values and aligned timestamps
         const toSeries = (values: number[], timestamps?: number[]): Array<{ time: Date; value: number }> => {

@@ -24,20 +24,64 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
     const fetchVehicles = async () => {
       try {
         setLoadingVehicles(true);
-        const response = await fetch('https://www.smartdatalink.com.au/get-vehicles', {
+        setError(''); // Clear previous errors
+        
+        // Try the API endpoint
+        const apiUrl = 'https://www.no-reply.com.au/smart_data_link/get-vehicles';
+        console.log('🔗 Fetching vehicles from:', apiUrl);
+        
+        const response = await fetch(apiUrl, {
           headers: { 'Accept': 'application/json' },
-          cache: 'no-store'
+          cache: 'no-store',
+          mode: 'cors'
         });
-        if (!response.ok) throw new Error('Failed to fetch vehicles');
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const json = await response.json();
-        const vehiclesData = json.data || [];
+        console.log('✅ Vehicles API response:', json);
+        
+        // Handle different response formats
+        let vehiclesData: Vehicle[] = [];
+        if (Array.isArray(json)) {
+          vehiclesData = json;
+        } else if (Array.isArray(json.data)) {
+          vehiclesData = json.data;
+        } else if (json.vehicles && Array.isArray(json.vehicles)) {
+          vehiclesData = json.vehicles;
+        } else if (json.result && Array.isArray(json.result)) {
+          vehiclesData = json.result;
+        }
+        
+        // Ensure vehicles have required fields
+        vehiclesData = vehiclesData
+          .filter((v: any) => v && (v.id !== undefined || v.vehicle_id !== undefined))
+          .map((v: any) => ({
+            id: v.id || v.vehicle_id || v.device_id,
+            name: v.name || v.vehicle_name || v.device_name || `Vehicle ${v.id || v.vehicle_id || v.device_id}`
+          }));
+        
+        console.log('📋 Processed vehicles:', vehiclesData);
+        
+        if (vehiclesData.length === 0) {
+          throw new Error('No vehicles found in API response');
+        }
+        
         setVehicles(vehiclesData);
         if (vehiclesData.length > 0) {
           setSelectedVehicleId(vehiclesData[0].id);
         }
       } catch (err: any) {
-        setError('Failed to load vehicles. Please try again.');
-        console.error('Error fetching vehicles:', err);
+        const errorMsg = err.message || 'Failed to load vehicles. Please check the API endpoint.';
+        setError(errorMsg);
+        console.error('❌ Error fetching vehicles:', err);
+        console.error('Error details:', {
+          message: err.message,
+          stack: err.stack
+        });
+        setVehicles([]);
       } finally {
         setLoadingVehicles(false);
       }
@@ -53,30 +97,60 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
           setLoadingDates(true);
           setSelectedDate(''); // Reset date when vehicle changes
           setError(''); // Clear previous errors
-          const response = await fetch(`https://www.smartdatalink.com.au/get-dates-by-devices-id?id=${selectedVehicleId}`, {
+          
+          // Use the API endpoint with vehicles_id parameter
+          const apiUrl = `https://www.no-reply.com.au/smart_data_link/get-dates-by-vehicles-id?vehicles_id=${selectedVehicleId}`;
+          console.log('🔗 Fetching dates from:', apiUrl);
+          
+          const response = await fetch(apiUrl, {
             headers: { 'Accept': 'application/json' },
-            cache: 'no-store'
+            cache: 'no-store',
+            mode: 'cors'
           });
-          if (!response.ok) throw new Error('Failed to fetch dates');
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+          
           const json = await response.json();
+          console.log('✅ Dates API response:', json);
+          
           // Handle different possible response formats
           let datesData: string[] = [];
-          if (Array.isArray(json.data)) {
-            datesData = json.data;
-          } else if (Array.isArray(json)) {
+          if (Array.isArray(json)) {
             datesData = json;
+          } else if (Array.isArray(json.data)) {
+            datesData = json.data;
           } else if (json.dates && Array.isArray(json.dates)) {
             datesData = json.dates;
+          } else if (json.result && Array.isArray(json.result)) {
+            datesData = json.result;
+          } else if (json.date && Array.isArray(json.date)) {
+            datesData = json.date;
           }
+          
           // Ensure dates are strings and sort them (newest first)
           datesData = datesData
             .map((d: any) => String(d))
             .filter((d: string) => d.length > 0)
             .sort((a: string, b: string) => b.localeCompare(a)); // Sort descending (newest first)
+          
+          console.log('📅 Processed dates:', datesData);
+          
+          if (datesData.length === 0) {
+            throw new Error('No dates found for this vehicle');
+          }
+          
           setDates(datesData);
         } catch (err: any) {
-          setError('Failed to load dates. Please try again.');
-          console.error('Error fetching dates:', err);
+          const errorMsg = err.message || 'Failed to load dates. Please check the API endpoint.';
+          setError(errorMsg);
+          console.error('❌ Error fetching dates:', err);
+          console.error('Error details:', {
+            message: err.message,
+            stack: err.stack,
+            vehicleId: selectedVehicleId
+          });
           setDates([]);
         } finally {
           setLoadingDates(false);
