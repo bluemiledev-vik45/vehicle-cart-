@@ -437,7 +437,7 @@ def process_ftp_data():
     ftp.quit()
     cursor.close()
     conn.close()
-    
+
     # ============================================================================
     # REDIS CACHING: After processing CSV and updating database,
     # generate JSON and cache it to Redis for fast API responses

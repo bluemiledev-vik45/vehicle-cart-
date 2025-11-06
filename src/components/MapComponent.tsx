@@ -318,23 +318,23 @@ const MapComponent: React.FC = () => {
           }
           
           return {
-            time: (() => {
+          time: (() => {
               // Try timestamp field first (ISO format: "2025-11-04T20:03:00")
-              const ts = p.timestamp ?? p.timeStamp ?? p.ts ?? p.epoch ?? null;
-              if (ts != null) {
+            const ts = p.timestamp ?? p.timeStamp ?? p.ts ?? p.epoch ?? null;
+            if (ts != null) {
                 if (typeof ts === 'string') {
                   const parsed = Date.parse(ts);
                   if (Number.isFinite(parsed)) return parsed;
                 } else {
-                  const n = Number(ts);
-                  if (Number.isFinite(n)) return n < 1e12 ? n * 1000 : n;
-                }
+              const n = Number(ts);
+              if (Number.isFinite(n)) return n < 1e12 ? n * 1000 : n;
+            }
               }
               // Fallback to time field (HH:mm:ss format)
               const timeStr = String(p.time ?? p.Time ?? p.TIME ?? p.hms ?? '00:00:00');
               const parsedTime = parseHMS(timeStr);
               return parsedTime;
-            })(),
+          })(),
             lat: finalLat,
             lng: finalLng
           };

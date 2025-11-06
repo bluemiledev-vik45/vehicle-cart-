@@ -142,7 +142,7 @@ const FilterControls: React.FC = () => {
               <option key={d} value={d}>{d}</option>
             ))}
           </select>
-
+          
           <button className={styles.filterButton} onClick={() => window.dispatchEvent(new CustomEvent('filters:open'))}>Additional Filters</button>
         </div>
         

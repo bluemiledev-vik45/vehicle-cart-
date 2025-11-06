@@ -445,12 +445,12 @@ const VehicleDashboard: React.FC = () => {
           // Don't show alert if this is just a network error on page load
           // Only show if we actually have a selection
           if (selectedVehicleId && selectedDate) {
-            // Provide helpful error message
-            const errorMsg = err.message.includes('Failed to fetch') || err.message.includes('CORS')
-              ? 'CORS or network error. The API server may not allow requests from this domain, or the endpoint may be incorrect.'
-              : err.message;
-            
-            setLoading(false);
+          // Provide helpful error message
+          const errorMsg = err.message.includes('Failed to fetch') || err.message.includes('CORS')
+            ? 'CORS or network error. The API server may not allow requests from this domain, or the endpoint may be incorrect.'
+            : err.message;
+          
+          setLoading(false);
             setProcessingProgress(0);
             console.error('Full error details:', err);
             alert(`Failed to load chart data from API.\n\nEndpoint: /reet_python/create_json.php?reading_date=${selectedDate}&devices_serial_no=${selectedVehicleId}\n\nError: ${errorMsg}\n\nTroubleshooting:\n1. Check browser console (F12) for detailed error\n2. Check Network tab to see if request was blocked\n3. Restart dev server (npm start) - proxy needs restart to take effect\n4. Verify the API endpoint is accessible\n\nNote: Make sure your dev server is running and has been restarted after proxy configuration.`);
@@ -644,8 +644,8 @@ const VehicleDashboard: React.FC = () => {
         } else {
           // Fallback to old format
           timesRaw = Array.isArray(pick('times', 'timeStamps', 'timestamps')) 
-            ? pick('times', 'timeStamps', 'timestamps') 
-            : [];
+          ? pick('times', 'timeStamps', 'timestamps') 
+          : [];
         }
         
         const times: number[] = timesRaw
@@ -708,6 +708,7 @@ const VehicleDashboard: React.FC = () => {
         digitalSignalsRaw.forEach((s: any, idx: number) => {
           console.group(`Digital Signal ${idx + 1}: ${s.id || s.name || 'Unknown'}`);
           console.log('Raw API Data:', s);
+          console.log('Inverse value from API:', s.inverse, '(type:', typeof s.inverse, ')');
           console.log('Values array:', s.values);
           console.log('Values length:', s.values?.length || 0);
           console.log('Times array:', s.times || s.timeStamps || s.timestamps || 'Using global times');
@@ -719,8 +720,15 @@ const VehicleDashboard: React.FC = () => {
           id: 'digital-status',
           name: 'Digital Status Indicators',
           metrics: digitalSignalsRaw.map((s: any, idx: number) => {
-            // Check if inverse is "Yes" - if so, invert the values (0 becomes 1, 1 becomes 0)
-            const isInverse = String(s.inverse || '').toLowerCase() === 'yes';
+            // Check if inverse is EXACTLY "yes" (case-insensitive) - only then invert values
+            // If inverse = "no", "No", undefined, null, or anything else → show original values
+            const inverseStr = String(s.inverse || '').toLowerCase().trim();
+            const isInverse = inverseStr === 'yes';
+            console.log(`🔍 Digital Signal ${idx + 1} - Inverse Check:`, {
+              rawInverse: s.inverse,
+              normalized: inverseStr,
+              willInvert: isInverse
+            });
             
             // Handle both string times (from flat array) and numeric timestamps
             let signalTimes: any[] = s.times || s.timeStamps || s.timestamps || [];
@@ -739,15 +747,23 @@ const VehicleDashboard: React.FC = () => {
               : times;
             
             // Apply inverse logic to values before creating series
+            // If inverse = "yes", reverse ALL values at EVERY time point (0→1, 1→0)
+            // If inverse = "no" or not present, show values as-is
             let values = s.values || [];
-            if (isInverse && Array.isArray(values)) {
+            // ONLY invert when isInverse is explicitly true (inverse === "yes")
+            // If inverse = "no", "No", undefined, null, or anything else → keep original values
+            if (isInverse === true && Array.isArray(values)) {
               values = values.map((v: any) => {
                 const numValue = Number(v);
+                // Invert ALL values: 0 becomes 1, 1 becomes 0
                 // Only invert if value is exactly 0 or 1
                 if (numValue === 1) return 0;
                 if (numValue === 0) return 1;
                 return numValue; // Keep other values as-is
               });
+            } else {
+              // When inverse is "no" or not set, keep original values unchanged
+              // No inversion applied - values remain as-is from API
             }
             
             const data = toSeries(values, normalizedSignalTimes);
@@ -800,17 +816,14 @@ const VehicleDashboard: React.FC = () => {
           const offset = Number(s.offset ?? 0); // Default to 0 if not provided
           
           // Helper function to apply resolution and offset transformation
-          // Apply if value is > 0 or not null (i.e., apply to all valid values)
+          // Apply to all valid numeric values (including 0 and negative values)
           const applyTransformation = (value: number | null): number | null => {
             if (value === null || value === undefined) return null;
             const numValue = Number(value);
             if (!Number.isFinite(numValue) || isNaN(numValue)) return null;
             // Apply transformation: (value * resolution) + offset
-            // Only apply if value > 0 or not null (apply to all valid values)
-            if (numValue > 0 || numValue !== null) {
-              return (numValue * resolution) + offset;
-            }
-            return numValue;
+            // Apply to all valid numeric values
+            return (numValue * resolution) + offset;
           };
           
           // Use exact API values - filter out invalid values immediately to prevent NaN
@@ -967,6 +980,7 @@ const VehicleDashboard: React.FC = () => {
           (payload.digitalPerSecond as Array<any>).forEach((series: any, idx: number) => {
             console.group(`Digital Per-Second Series ${idx + 1}: ${series.id || series.name || 'Unknown'}`);
             console.log('Raw API Data:', series);
+            console.log('Inverse value from API:', series.inverse, '(type:', typeof series.inverse, ')');
             console.log('Points count:', series.points?.length || 0);
             console.log('First 3 points:', series.points?.slice(0, 3));
             console.groupEnd();
@@ -981,18 +995,41 @@ const VehicleDashboard: React.FC = () => {
             return new Date(alignToMinute(timestamp));
           };
           const metrics = (payload.digitalPerSecond as Array<any>).map((series: any, idx: number) => {
-            // Check if inverse is "Yes" - if so, invert the values (0 becomes 1, 1 becomes 0)
-            const isInverse = String(series.inverse || '').toLowerCase() === 'yes';
+            // Check if inverse is EXACTLY "yes" (case-insensitive) - only then invert values
+            // If inverse = "no", "No", undefined, null, or anything else → show original values
+            const inverseStr = String(series.inverse || '').toLowerCase().trim();
+            const isInverse = inverseStr === 'yes';
+            console.log(`🔍 Digital Per-Second Series ${idx + 1} - Inverse Check:`, {
+              rawInverse: series.inverse,
+              normalized: inverseStr,
+              willInvert: isInverse
+            });
             
             // Use exact API values, align timestamps to minutes, sort
-            const pts = (series.points || []).map((p: any) => {
-              let value = Number(p.value ?? 0);
-              // Apply inverse logic: if inverse is "Yes", flip 0 to 1 and 1 to 0
-              if (isInverse) {
-                if (value === 1) value = 0;
-                else if (value === 0) value = 1;
+            // If inverse = "yes", reverse ALL values at EVERY time point (0→1, 1→0)
+            // If inverse = "no" or not present, show values as-is
+            const pts = (series.points || []).map((p: any, pointIdx: number) => {
+              const originalValue = Number(p.value ?? 0);
+              let value = originalValue;
+              
+              // Apply inverse logic: ONLY if inverse is EXACTLY "yes" (case-insensitive)
+              // If inverse = "no", "No", undefined, null, or anything else → keep original value
+              if (isInverse === true) {
+                // Only invert when isInverse is explicitly true
+                if (originalValue === 1) {
+                  value = 0;
+                } else if (originalValue === 0) {
+                  value = 1;
+                }
                 // Keep other values as-is
               }
+              // When inverse is "no" or not set, value remains unchanged (originalValue)
+              
+              // Debug first few points to verify inversion logic
+              if (pointIdx < 3) {
+                console.log(`  Point ${pointIdx}: original=${originalValue}, isInverse=${isInverse}, final=${value}`);
+              }
+              
               return {
                 time: parseHMS(p.time),
                 value
@@ -1004,11 +1041,22 @@ const VehicleDashboard: React.FC = () => {
             // Debug: Log processed per-second data
             console.group(`🔍 Digital Per-Second Series ${idx + 1} - Processed Data: ${series.id || series.name || 'Unknown'}`);
             console.log('Inverse:', series.inverse, '→ Applied:', isInverse);
-            console.log('API Points (raw):', series.points);
-            console.log('Processed Points:', pts);
+            console.log('Inverse check details:', {
+              raw: series.inverse,
+              normalized: inverseStr,
+              isInverse,
+              isInverseType: typeof isInverse,
+              isInverseStrict: isInverse === true
+            });
+            console.log('API Points (raw - first 5):', series.points?.slice(0, 5));
+            console.log('Processed Points (first 5):', pts.slice(0, 5));
             console.log('Points Count:', pts.length);
-            console.log('First 5 points:', pts.slice(0, 5));
-            console.log('Last 5 points:', pts.slice(-5));
+            console.log('Sample comparison:', {
+              firstRaw: series.points?.[0],
+              firstProcessed: pts[0],
+              shouldBeSame: !isInverse,
+              isSame: series.points?.[0]?.value === pts[0]?.value
+            });
             console.groupEnd();
             
             if (pts.length) {
@@ -1017,12 +1065,25 @@ const VehicleDashboard: React.FC = () => {
               perSecondDigitalMinTs = perSecondDigitalMinTs === null ? localMin : Math.min(perSecondDigitalMinTs, localMin);
               perSecondDigitalMaxTs = perSecondDigitalMaxTs === null ? localMax : Math.max(perSecondDigitalMaxTs, localMax);
             }
+            const lastValue = pts.length ? Number(pts[pts.length - 1].value) : 0;
+            // Debug log for Jib Chain Fault
+            if (String(series.name ?? series.id) === 'Jib Chain Fault') {
+              console.log('🔍 Jib Chain Fault - Setting currentValue:', {
+                name: series.name,
+                inverse: series.inverse,
+                isInverse,
+                lastPoint: pts.length > 0 ? pts[pts.length - 1] : null,
+                lastValue,
+                first5Points: pts.slice(0, 5),
+                last5Points: pts.slice(-5)
+              });
+            }
             return {
               id: String(series.id),
               name: String(series.name ?? series.id),
               color: String(series.color ?? '#999'),
               data: pts,
-              currentValue: pts.length ? Number(pts[pts.length - 1].value) : 0
+              currentValue: lastValue
             };
           });
           if (metrics.length) {
@@ -1050,16 +1111,14 @@ const VehicleDashboard: React.FC = () => {
             const offset = Number(series.offset ?? 0); // Default to 0 if not provided
             
             // Helper function to apply resolution and offset transformation
+            // Apply to all valid numeric values (including 0 and negative values)
             const applyTransformation = (value: number | null | undefined): number => {
               if (value === null || value === undefined) return 0;
               const numValue = Number(value);
               if (!Number.isFinite(numValue)) return 0;
               // Apply transformation: (value * resolution) + offset
-              // Only apply if value > 0 or not null (apply to all valid values)
-              if (numValue > 0 || numValue !== null) {
-                return (numValue * resolution) + offset;
-              }
-              return numValue;
+              // Apply to all valid numeric values
+              return (numValue * resolution) + offset;
             };
             
             // Use exact API values, apply resolution and offset, align timestamps to minutes
@@ -1175,17 +1234,14 @@ const VehicleDashboard: React.FC = () => {
             const offset = Number(series.offset ?? 0); // Default to 0 if not provided
             
             // Helper function to apply resolution and offset transformation
-            // Apply if value is > 0 or not null (i.e., apply to all valid values)
+            // Apply to all valid numeric values (including 0 and negative values)
             const applyTransformation = (value: number | null | undefined): number => {
               if (value === null || value === undefined) return 0;
               const numValue = Number(value);
               if (!Number.isFinite(numValue)) return 0;
               // Apply transformation: (value * resolution) + offset
-              // Only apply if value > 0 or not null (apply to all valid values)
-              if (numValue > 0 || numValue !== null) {
-                return (numValue * resolution) + offset;
-              }
-              return numValue;
+              // Apply to all valid numeric values
+              return (numValue * resolution) + offset;
             };
             
             // Use exact API values, apply resolution and offset, align timestamps to minutes
@@ -1293,7 +1349,7 @@ const VehicleDashboard: React.FC = () => {
 
         // Set digital chart immediately if present
         if (digitalChart && digitalChart.metrics.length > 0) {
-          setDigitalStatusChart(digitalChart);
+        setDigitalStatusChart(digitalChart);
         }
 
         // Process all analog metrics but render progressively to avoid blocking UI
@@ -1349,16 +1405,26 @@ const VehicleDashboard: React.FC = () => {
         // Set time range after all data is processed
         const shouldUpdateTimeRange = true;
         if (shouldUpdateTimeRange) {
-          // Determine the actual data range from all loaded signals
-          const minCandidates: number[] = [];
-          const maxCandidates: number[] = [];
-          // Collect from per-second data first (most accurate)
-          if (typeof perSecondAnalogMinTs === 'number') minCandidates.push(perSecondAnalogMinTs);
-          if (typeof perSecondDigitalMinTs === 'number') minCandidates.push(perSecondDigitalMinTs);
-          if (typeof perSecondAnalogMaxTs === 'number') maxCandidates.push(perSecondAnalogMaxTs);
-          if (typeof perSecondDigitalMaxTs === 'number') maxCandidates.push(perSecondDigitalMaxTs);
+        // Determine the actual data range from all loaded signals
+        const minCandidates: number[] = [];
+        const maxCandidates: number[] = [];
+        // Collect from per-second data first (most accurate)
+        if (typeof perSecondAnalogMinTs === 'number') minCandidates.push(perSecondAnalogMinTs);
+        if (typeof perSecondDigitalMinTs === 'number') minCandidates.push(perSecondDigitalMinTs);
+        if (typeof perSecondAnalogMaxTs === 'number') maxCandidates.push(perSecondAnalogMaxTs);
+        if (typeof perSecondDigitalMaxTs === 'number') maxCandidates.push(perSecondDigitalMaxTs);
           // Also collect from actual analog data points (current page only for now, will include all when digital chart loads)
-          analogMetrics.forEach(m => {
+        analogMetrics.forEach(m => {
+          if (m.data && m.data.length > 0) {
+            const first = m.data[0]?.time?.getTime?.();
+            const last = m.data[m.data.length - 1]?.time?.getTime?.();
+            if (typeof first === 'number') minCandidates.push(first);
+            if (typeof last === 'number') maxCandidates.push(last);
+          }
+        });
+        // Also collect from actual digital data points
+        if (digitalChart && digitalChart.metrics.length > 0) {
+          digitalChart.metrics.forEach(m => {
             if (m.data && m.data.length > 0) {
               const first = m.data[0]?.time?.getTime?.();
               const last = m.data[m.data.length - 1]?.time?.getTime?.();
@@ -1366,45 +1432,35 @@ const VehicleDashboard: React.FC = () => {
               if (typeof last === 'number') maxCandidates.push(last);
             }
           });
-          // Also collect from actual digital data points
-          if (digitalChart && digitalChart.metrics.length > 0) {
-            digitalChart.metrics.forEach(m => {
-              if (m.data && m.data.length > 0) {
-                const first = m.data[0]?.time?.getTime?.();
-                const last = m.data[m.data.length - 1]?.time?.getTime?.();
-                if (typeof first === 'number') minCandidates.push(first);
-                if (typeof last === 'number') maxCandidates.push(last);
-              }
-            });
+        }
+        const combinedMin = minCandidates.length ? Math.min(...minCandidates) : null;
+        const combinedMax = maxCandidates.length ? Math.max(...maxCandidates) : null;
+        if (combinedMin !== null && combinedMax !== null) {
+          const start = new Date(combinedMin);
+          const end = new Date(combinedMax);
+          const center = new Date(Math.floor((start.getTime() + end.getTime()) / 2));
+          setSelectedTime(center);
+          setSelectionStart(start);
+          setSelectionEnd(end);
+        } else {
+          // Fallback to times array only if no data points found
+          const firstTs = times[0];
+          const lastTs = times[times.length - 1];
+          if (firstTs) {
+            const first = new Date(firstTs);
+            setSelectionStart(first);
           }
-          const combinedMin = minCandidates.length ? Math.min(...minCandidates) : null;
-          const combinedMax = maxCandidates.length ? Math.max(...maxCandidates) : null;
-          if (combinedMin !== null && combinedMax !== null) {
-            const start = new Date(combinedMin);
-            const end = new Date(combinedMax);
-            const center = new Date(Math.floor((start.getTime() + end.getTime()) / 2));
-            setSelectedTime(center);
-            setSelectionStart(start);
-            setSelectionEnd(end);
-          } else {
-            // Fallback to times array only if no data points found
-            const firstTs = times[0];
-            const lastTs = times[times.length - 1];
+          if (lastTs) {
+            const last = new Date(lastTs);
+            setSelectionEnd(last);
             if (firstTs) {
-              const first = new Date(firstTs);
-              setSelectionStart(first);
-            }
-            if (lastTs) {
-              const last = new Date(lastTs);
-              setSelectionEnd(last);
-              if (firstTs) {
-                const center = new Date(Math.floor((firstTs + lastTs) / 2));
-                setSelectedTime(center);
-              } else {
-                setSelectedTime(new Date(lastTs));
-              }
+              const center = new Date(Math.floor((firstTs + lastTs) / 2));
+              setSelectedTime(center);
+            } else {
+              setSelectedTime(new Date(lastTs));
             }
           }
+        }
         }
         
         // Loading state is managed by processDataInChunks
@@ -1529,8 +1585,8 @@ const VehicleDashboard: React.FC = () => {
     
     // Throttle updates to prevent excessive re-renders
     if (now - lastUpdateRef.current >= THROTTLE_MS) {
-      setSelectedTime(new Date(timestamp));
-      setCrosshairActive(true);
+    setSelectedTime(new Date(timestamp));
+    setCrosshairActive(true);
       lastUpdateRef.current = now;
       rafRef.current = null;
     } else {
@@ -1582,10 +1638,10 @@ const VehicleDashboard: React.FC = () => {
         <div className={styles.headerBar}>
           <div className={styles.headerTitle}>Smart Data Link</div>
           <div className={styles.headerStatus}>
-              <span className={styles.headerLabel}>Time:</span>
-              <span className={styles.headerValue}>
-                {selectedTime ? format(selectedTime, 'HH:mm:ss') : '—'}
-              </span>
+            <span className={styles.headerLabel}>Time:</span>
+            <span className={styles.headerValue}>
+              {selectedTime ? format(selectedTime, 'HH:mm:ss') : '—'}
+            </span>
           </div>
         </div>
         {scrubberData.length > 0 && (
@@ -1619,7 +1675,7 @@ const VehicleDashboard: React.FC = () => {
           {digitalStatusChart && digitalStatusChart.metrics.length > 0 && (
             <DigitalSignalTimeline
               signals={digitalStatusChart.metrics.filter(m => (visibleDigital[m.id] ?? true))}
-              selectedTime={selectedTime}        
+              selectedTime={selectedTime}
               crosshairActive={crosshairActive}
               timeDomain={timeDomain}
             />
@@ -1666,13 +1722,13 @@ const VehicleDashboard: React.FC = () => {
                     backgroundColor: '#3b82f6',
                     transition: 'width 0.3s ease'
                   }}></div>
-                </div>
+          </div>
                 <div style={{ fontSize: '12px' }}>
                   Processing charts... {processingProgress}%
-                </div>
-              </div>
+        </div>
+      </div>
             )}
-          </div>
+    </div>
         </div>
       </div>
     </div>

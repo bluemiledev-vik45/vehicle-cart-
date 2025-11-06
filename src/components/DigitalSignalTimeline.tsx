@@ -118,18 +118,51 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
   }, [timeDomain]);
 
   const formatYAxisLabel = (value: number) => {
-    const signal = signals[value];
-    return signal ? signal.name : '';
+    // Y-axis ticks are at index - 0.25, so we need to round up to get the correct signal index
+    const signalIndex = Math.round(value + 0.25);
+    const signal = signals[signalIndex];
+    if (!signal) return '';
+    return `${signal.name}`;
   };
 
   const getSignalStatus = (signal: DigitalSignalData): string => {
     if (!selectedTime) {
-      return signal.currentValue === 1 ? 'ON' : 'OFF';
+      // Use the last value in the data array if available, otherwise use currentValue
+      const lastValue = signal.data.length > 0 
+        ? signal.data[signal.data.length - 1].value 
+        : signal.currentValue;
+      const isOn = Number(lastValue) === 1;
+      // Debug log for Jib Chain Fault
+      if (signal.name === 'Jib Chain Fault') {
+        console.log('🔍 Jib Chain Fault Status Check:', {
+          name: signal.name,
+          currentValue: signal.currentValue,
+          lastDataPoint: signal.data.length > 0 ? signal.data[signal.data.length - 1] : null,
+          lastValue,
+          isOn,
+          status: isOn ? 'ON' : 'OFF',
+          allValues: signal.data.slice(-5).map(d => d.value)
+        });
+      }
+      return isOn ? 'ON' : 'OFF';
     }
     const point = signal.data.find(d => 
       Math.abs(d.time.getTime() - selectedTime.getTime()) < 900000 // 15 min tolerance
     );
-    return point?.value === 1 ? 'ON' : 'OFF';
+    const value = point?.value ?? signal.currentValue;
+    const isOn = Number(value) === 1;
+    // Debug log for Jib Chain Fault
+    if (signal.name === 'Jib Chain Fault') {
+      console.log('🔍 Jib Chain Fault Status Check (with selectedTime):', {
+        name: signal.name,
+        selectedTime,
+        point,
+        value,
+        isOn,
+        status: isOn ? 'ON' : 'OFF'
+      });
+    }
+    return isOn ? 'ON' : 'OFF';
   };
 
   // Hover tooltip removed per requirement
@@ -179,7 +212,7 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
                 <YAxis
                   type="number"
                   domain={[-0.5, signals.length - 0.5]}
-                  ticks={signals.map((_, index) => index)}
+                  ticks={signals.map((_, index) => index - 0.25)}
                   tickFormatter={formatYAxisLabel}
                   stroke="#6b7280"
                   tick={{ fill: '#6b7280', fontSize: 9 }}
@@ -216,7 +249,11 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
                 const bottom = 40; // chart margin bottom
                 const h = size.h > 0 ? size.h : chartHeight; // fallback height matches dynamic height
                 const innerH = Math.max(1, h - top - bottom);
-                const y = top + ((idx + 0.25) / Math.max(1, signals.length)) * innerH;
+                // Y-axis domain is [-0.5, signals.length - 0.5]
+                // Signal center is at idx - 0.25
+                // Convert Y-axis value to pixel: pixelY = top + ((yAxisValue + 0.5) / signals.length) * innerH
+                const yAxisCenter = idx - 0.25;
+                const y = top + ((yAxisCenter + 0.5) / signals.length) * innerH;
                 return (
                   <div
                     key={signal.id}
@@ -230,7 +267,6 @@ const DigitalSignalTimeline: React.FC<DigitalSignalTimelineProps> = ({
             </div>
           </div>
         </div>
-        {/* Status panel removed per request */}
       </div>
     </div>
   );
