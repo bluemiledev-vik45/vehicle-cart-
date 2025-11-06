@@ -258,8 +258,36 @@ const VehicleDashboard: React.FC = () => {
           cache: 'no-store',
           mode: 'cors'
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
+        
+        if (!res.ok) {
+          const errorText = await res.text().catch(() => 'Unable to read error response');
+          console.error('❌ Vehicles API Error Response:', errorText.substring(0, 500));
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+        
+        // Get response as text first to check if it's actually JSON
+        const text = await res.text();
+        const contentType = res.headers.get('content-type');
+        
+        // Check if response is actually JSON (even if Content-Type is wrong)
+        let json: any;
+        try {
+          // Try to parse as JSON
+          json = JSON.parse(text);
+          console.log('✅ Successfully parsed JSON response (Content-Type was:', contentType, ')');
+        } catch (parseError) {
+          // If parsing fails, check if it's HTML
+          if (text.includes('<!doctype') || text.includes('<html')) {
+            console.error('❌ Vehicles API Response is HTML. Content-Type:', contentType);
+            console.error('❌ Response body (first 500 chars):', text.substring(0, 500));
+            throw new Error(`API returned HTML page instead of JSON. Content-Type: ${contentType}`);
+          } else {
+            // Not HTML, but also not valid JSON
+            console.error('❌ Vehicles API Response is not valid JSON. Content-Type:', contentType);
+            console.error('❌ Response body (first 500 chars):', text.substring(0, 500));
+            throw new Error(`API returned invalid JSON. Content-Type: ${contentType}`);
+          }
+        }
         // Map: [{ devices_serial_no: "6363299" }, ...]
         const arr = (Array.isArray(json) ? json : [])
           .map((v: any) => String(v?.devices_serial_no || ''))
@@ -285,8 +313,31 @@ const VehicleDashboard: React.FC = () => {
         setLoadingDates(true);
         const url = `/reet_python/get_vehicle_dates.php?devices_serial_no=${selectedVehicleId}`;
         const res = await fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store', mode: 'cors' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
+        if (!res.ok) {
+          const errorText = await res.text().catch(() => 'Unable to read error response');
+          console.error('❌ VehicleDashboard Dates API Error:', errorText.substring(0, 500));
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+        
+        // Get response as text first to check if it's actually JSON
+        const text = await res.text();
+        const contentType = res.headers.get('content-type');
+        
+        // Check if response is actually JSON (even if Content-Type is wrong)
+        let json: any;
+        try {
+          json = JSON.parse(text);
+          console.log('✅ VehicleDashboard: Successfully parsed dates JSON (Content-Type was:', contentType, ')');
+        } catch (parseError) {
+          if (text.includes('<!doctype') || text.includes('<html')) {
+            console.error('❌ VehicleDashboard: Dates API returned HTML. Content-Type:', contentType);
+            console.error('❌ Response body (first 500 chars):', text.substring(0, 500));
+            throw new Error(`API returned HTML instead of JSON`);
+          } else {
+            console.error('❌ VehicleDashboard: Dates API invalid JSON. Content-Type:', contentType);
+            throw new Error(`API returned invalid JSON`);
+          }
+        }
         // Map: [{ date: "YYYY-MM-DD" }]
         const arr: string[] = (Array.isArray(json) ? json : [])
           .map((o: any) => String(o?.date || ''))
@@ -362,16 +413,26 @@ const VehicleDashboard: React.FC = () => {
           
           // Get response as text first to check if it's valid JSON
           const responseText = await apiRes.text();
-          console.log('📄 Raw API response text:', responseText.substring(0, 200));
+          const contentType = apiRes.headers.get('content-type');
+          console.log('📄 Raw API response text (first 200 chars):', responseText.substring(0, 200));
+          console.log('📄 Content-Type:', contentType);
           
           // Try to parse as JSON
           try {
             json = JSON.parse(responseText);
-            console.log('✅ API success, parsed JSON:', json);
+            console.log('✅ API success, parsed JSON (Content-Type was:', contentType, ')');
           } catch (parseError: any) {
             console.error('❌ Failed to parse response as JSON:', parseError);
-            console.error('Response text (first 500 chars):', responseText.substring(0, 500));
-            throw new Error(`Invalid JSON response from API. The server may be returning PHP serialized data or HTML. Response starts with: ${responseText.substring(0, 100)}`);
+            console.error('❌ Content-Type:', contentType);
+            console.error('❌ Response text (first 1000 chars):', responseText.substring(0, 1000));
+            
+            // Check if it's HTML
+            if (responseText.includes('<!doctype') || responseText.includes('<html')) {
+              console.error('❌ API returned HTML page instead of JSON');
+              throw new Error(`API returned HTML page instead of JSON. This usually means the proxy isn't working or the endpoint doesn't exist. Check console for full response.`);
+            } else {
+              throw new Error(`Invalid JSON response from API. The server may be returning PHP serialized data or HTML. Response starts with: ${responseText.substring(0, 100)}`);
+            }
           }
         } catch (err: any) {
           console.error('❌ API request failed:', err);

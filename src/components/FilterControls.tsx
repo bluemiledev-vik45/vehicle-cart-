@@ -16,9 +16,32 @@ const FilterControls: React.FC = () => {
     const load = async () => {
       try {
         // Fetch from reet_python vehicles API (via proxy)
-        const apiRes = await fetch('/reet_python/get_vehicles.php', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
-        if (!apiRes.ok) throw new Error('bad');
-        const json = await apiRes.json();
+        const apiRes = await fetch('/reet_python/get_vehicles.php', { headers: { 'Accept': 'application/json' }, cache: 'no-store', mode: 'cors' });
+        if (!apiRes.ok) {
+          const errorText = await apiRes.text().catch(() => 'Unable to read error response');
+          console.error('❌ FilterControls Vehicles API Error:', errorText.substring(0, 500));
+          throw new Error(`HTTP ${apiRes.status}: ${apiRes.statusText}`);
+        }
+        
+        // Get response as text first to check if it's actually JSON
+        const text = await apiRes.text();
+        const contentType = apiRes.headers.get('content-type');
+        
+        // Check if response is actually JSON (even if Content-Type is wrong)
+        let json: any;
+        try {
+          json = JSON.parse(text);
+          console.log('✅ FilterControls: Successfully parsed vehicles JSON (Content-Type was:', contentType, ')');
+        } catch (parseError) {
+          if (text.includes('<!doctype') || text.includes('<html')) {
+            console.error('❌ FilterControls: Vehicles API returned HTML. Content-Type:', contentType);
+            console.error('❌ Response body (first 500 chars):', text.substring(0, 500));
+            throw new Error(`API returned HTML instead of JSON`);
+          } else {
+            console.error('❌ FilterControls: Vehicles API invalid JSON. Content-Type:', contentType);
+            throw new Error(`API returned invalid JSON`);
+          }
+        }
         // Map response: [{ devices_serial_no: "6363299" }, ...]
         const arr: Vehicle[] = Array.isArray(json)
           ? json.map((v: any) => String(v?.devices_serial_no || ''))
@@ -48,9 +71,32 @@ const FilterControls: React.FC = () => {
       try {
         // Fetch from reet_python dates API using devices_serial_no (via proxy)
         const url = `/reet_python/get_vehicle_dates.php?devices_serial_no=${selectedVehicleId}`;
-        const res = await fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
-        if (!res.ok) throw new Error('bad');
-        const json = await res.json();
+        const res = await fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store', mode: 'cors' });
+        if (!res.ok) {
+          const errorText = await res.text().catch(() => 'Unable to read error response');
+          console.error('❌ FilterControls Dates API Error:', errorText.substring(0, 500));
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+        
+        // Get response as text first to check if it's actually JSON
+        const text = await res.text();
+        const contentType = res.headers.get('content-type');
+        
+        // Check if response is actually JSON (even if Content-Type is wrong)
+        let json: any;
+        try {
+          json = JSON.parse(text);
+          console.log('✅ FilterControls: Successfully parsed dates JSON (Content-Type was:', contentType, ')');
+        } catch (parseError) {
+          if (text.includes('<!doctype') || text.includes('<html')) {
+            console.error('❌ FilterControls: Dates API returned HTML. Content-Type:', contentType);
+            console.error('❌ Response body (first 500 chars):', text.substring(0, 500));
+            throw new Error(`API returned HTML instead of JSON`);
+          } else {
+            console.error('❌ FilterControls: Dates API invalid JSON. Content-Type:', contentType);
+            throw new Error(`API returned invalid JSON`);
+          }
+        }
         // Map response: [{ date: "YYYY-MM-DD" }, ...]
         let arr: string[] = Array.isArray(json) ? json.map((o: any) => String(o?.date || '')) : [];
         arr = arr.filter((d: string) => d.length > 0);

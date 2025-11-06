@@ -79,8 +79,31 @@ const MapComponent: React.FC = () => {
           mode: 'cors',
           credentials: 'omit'
         });
-        if (!apiRes.ok) throw new Error('api failed');
-        const json = await apiRes.json();
+        if (!apiRes.ok) {
+          const errorText = await apiRes.text().catch(() => 'Unable to read error response');
+          console.error('❌ MapComponent API Error:', errorText.substring(0, 500));
+          throw new Error(`API failed with status ${apiRes.status}: ${apiRes.statusText}`);
+        }
+        
+        // Get response as text first to check if it's actually JSON
+        const text = await apiRes.text();
+        const contentType = apiRes.headers.get('content-type');
+        
+        // Check if response is actually JSON (even if Content-Type is wrong)
+        let json: any;
+        try {
+          json = JSON.parse(text);
+          console.log('✅ MapComponent: Successfully parsed JSON (Content-Type was:', contentType, ')');
+        } catch (parseError) {
+          if (text.includes('<!doctype') || text.includes('<html')) {
+            console.error('❌ MapComponent: API returned HTML. Content-Type:', contentType);
+            console.error('❌ Response body (first 1000 chars):', text.substring(0, 1000));
+            throw new Error(`API returned HTML instead of JSON`);
+          } else {
+            console.error('❌ MapComponent: API invalid JSON. Content-Type:', contentType);
+            throw new Error(`API returned invalid JSON`);
+          }
+        }
         // The create_json.php API returns data directly (not wrapped in {status, message, data})
         const payload: any = json;
         

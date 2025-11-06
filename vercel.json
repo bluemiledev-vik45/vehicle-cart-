@@ -1,0 +1,32 @@
+{
+  "rewrites": [
+    {
+      "source": "/reet_python/:path*",
+      "destination": "https://smartdatalink.com.au/reet_python/:path*"
+    },
+    {
+      "source": "/smart_data_link/:path*",
+      "destination": "https://no-reply.com.au/smart_data_link/:path*"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/reet_python/:path*",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, PUT, DELETE, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization"
+        }
+      ]
+    }
+  ]
+}
+

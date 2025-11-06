@@ -32,16 +32,50 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
         console.log('🔗 Fetching vehicles from:', apiUrl);
         
         const response = await fetch(apiUrl, {
-          headers: { 'Accept': 'application/json' },
+          headers: { 
+            'Accept': 'application/json',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+          },
           cache: 'no-store',
           mode: 'cors'
         });
         
         if (!response.ok) {
+          const errorText = await response.text().catch(() => 'Unable to read error response');
+          console.error('❌ API Error Response:', errorText.substring(0, 500));
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
-        const json = await response.json();
+        // Get response as text first to check if it's actually JSON
+        const text = await response.text();
+        const contentType = response.headers.get('content-type');
+        
+        // Check if response is actually JSON (even if Content-Type is wrong)
+        let json: any;
+        try {
+          // Try to parse as JSON
+          json = JSON.parse(text);
+          console.log('✅ Successfully parsed JSON response (Content-Type was:', contentType, ')');
+        } catch (parseError) {
+          // If parsing fails, check if it's HTML
+          if (text.includes('<!doctype') || text.includes('<html')) {
+            console.error('❌ Received HTML page instead of JSON. Content-Type:', contentType);
+            console.error('❌ Response URL:', response.url);
+            console.error('❌ Response status:', response.status);
+            console.error('❌ Response body (first 1000 chars):', text.substring(0, 1000));
+            console.error('❌ This usually means:');
+            console.error('   1. The proxy is not working (check terminal for proxy logs)');
+            console.error('   2. The API endpoint does not exist');
+            console.error('   3. The server returned an error page');
+            throw new Error(`API returned HTML page instead of JSON. Content-Type: ${contentType}. Check console for details.`);
+          } else {
+            // Not HTML, but also not valid JSON
+            console.error('❌ Response is not valid JSON. Content-Type:', contentType);
+            console.error('❌ Response body (first 1000 chars):', text.substring(0, 1000));
+            throw new Error(`API returned invalid JSON. Content-Type: ${contentType}. Check console for details.`);
+          }
+        }
         console.log('✅ Vehicles API response:', json);
         
         // Map reet_python response: [{ devices_serial_no: "6363299" }, ...]
@@ -96,10 +130,34 @@ const AssetSelectionModal: React.FC<AssetSelectionModalProps> = ({ onShowGraph }
           });
           
           if (!response.ok) {
+            const errorText = await response.text().catch(() => 'Unable to read error response');
+            console.error('❌ Dates API Error Response:', errorText.substring(0, 500));
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
           }
           
-          const json = await response.json();
+          // Get response as text first to check if it's actually JSON
+          const text = await response.text();
+          const contentType = response.headers.get('content-type');
+          
+          // Check if response is actually JSON (even if Content-Type is wrong)
+          let json: any;
+          try {
+            // Try to parse as JSON
+            json = JSON.parse(text);
+            console.log('✅ Successfully parsed dates JSON response (Content-Type was:', contentType, ')');
+          } catch (parseError) {
+            // If parsing fails, check if it's HTML
+            if (text.includes('<!doctype') || text.includes('<html')) {
+              console.error('❌ Dates API Response is HTML. Content-Type:', contentType);
+              console.error('❌ Response body (first 1000 chars):', text.substring(0, 1000));
+              throw new Error(`API returned HTML page instead of JSON. Content-Type: ${contentType}. Check console for details.`);
+            } else {
+              // Not HTML, but also not valid JSON
+              console.error('❌ Dates API Response is not valid JSON. Content-Type:', contentType);
+              console.error('❌ Response body (first 1000 chars):', text.substring(0, 1000));
+              throw new Error(`API returned invalid JSON. Content-Type: ${contentType}. Check console for details.`);
+            }
+          }
           console.log('✅ Dates API response:', json);
           
           // Map reet_python response: [{ date: "YYYY-MM-DD" }, ...]
